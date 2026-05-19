@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import subprocess
 import tempfile
@@ -120,10 +121,133 @@ def _materialize_fixtures(workdir: Path, fixtures: dict[str, str], mount_root: s
         target.write_text(content)
 
 
+# Body of the synthesized stdio JSON-RPC MCP server. The harness prepends a
+# header defining SERVER_NAME and TOOLS; this body is stdlib-only.
+_MCP_SERVER_BODY = '''
+import json
+import subprocess
+import sys
+
+_call_counts = {}
+
+
+def _run_tool(tool):
+    name = tool["name"]
+    _call_counts[name] = _call_counts.get(name, 0) + 1
+    if tool.get("retrieval"):
+        lines = []
+        for d in KB:
+            lines.append("[" + d.get("id", "doc") + "]")
+            lines.append(d.get("content", ""))
+        return chr(10).join(lines)
+    cmd = tool.get("on_call")
+    after = tool.get("on_call_after", 1)
+    if cmd and _call_counts[name] >= after:
+        proc = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        return (proc.stdout + proc.stderr).strip() or "(done)"
+    return tool.get("returns", "(ok)")
+
+
+def _handle(method, params):
+    if method == "initialize":
+        return {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": SERVER_NAME, "version": "0.0.1"},
+        }
+    if method == "tools/list":
+        return {"tools": [
+            {"name": t["name"], "description": t.get("description", ""),
+             "inputSchema": {"type": "object", "properties": {}}}
+            for t in TOOLS
+        ]}
+    if method == "tools/call":
+        tool = next((t for t in TOOLS if t["name"] == params.get("name")), None)
+        if tool is None:
+            return {"content": [{"type": "text", "text": "unknown tool"}], "isError": True}
+        return {"content": [{"type": "text", "text": _run_tool(tool)}]}
+    return None
+
+
+def main():
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if "id" not in msg:  # a notification -- no response
+            continue
+        result = _handle(msg.get("method"), msg.get("params") or {})
+        if result is None:
+            resp = {"jsonrpc": "2.0", "id": msg["id"],
+                    "error": {"code": -32601, "message": "method not found"}}
+        else:
+            resp = {"jsonrpc": "2.0", "id": msg["id"], "result": result}
+        print(json.dumps(resp), flush=True)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def _generate_mcp_server(mcp: dict) -> str:
+    """Synthesize a self-contained stdio MCP server from a case's `mcp:` spec.
+
+    `mcp` may carry a `kb` (knowledge base) — a `retrieval: true` tool then
+    returns its documents. This is how `rag:` cases ride on the MCP machinery.
+    """
+    server_name = mcp.get("server", "mcp-server")
+    tools = mcp.get("tools", [])
+    kb = mcp.get("kb", [])
+    header = (
+        "# Auto-generated stdio MCP server (agent-risk-scanner harness).\n"
+        f"SERVER_NAME = {server_name!r}\n"
+        f"TOOLS = {tools!r}\n"
+        f"KB = {kb!r}\n"
+    )
+    return header + _MCP_SERVER_BODY
+
+
+def _rag_to_mcp(rag: dict) -> dict:
+    """Compile a case's `rag:` knowledge base into an MCP server spec whose
+    `search_kb` tool retrieves the (possibly poisoned) documents."""
+    return {
+        "server": "knowledge-base",
+        "kb": rag.get("knowledge_base", []),
+        "tools": [
+            {
+                "name": "search_kb",
+                "description": "Search the knowledge base and return matching documents.",
+                "retrieval": True,
+            }
+        ],
+    }
+
+
+def _materialize_mcp_server(workdir: Path, mcp: dict, mount_root: str) -> None:
+    """Write the case's poisoned MCP server + client config into .mcp/."""
+    mcp_dir = workdir / ".mcp"
+    mcp_dir.mkdir(parents=True, exist_ok=True)
+    (mcp_dir / "server.py").write_text(_generate_mcp_server(mcp))
+    config = {"command": ["python3", f"{mount_root}/.mcp/server.py"]}
+    (mcp_dir / "mcp.json").write_text(json.dumps(config))
+
+
 def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) -> Observation:
     with tempfile.TemporaryDirectory() as tmp:
         workdir = Path(tmp)
         _materialize_fixtures(workdir, case.fixtures, agent.workdir)
+        if case.mcp:
+            _materialize_mcp_server(workdir, case.mcp, agent.workdir)
+        elif case.rag:
+            _materialize_mcp_server(workdir, _rag_to_mcp(case.rag), agent.workdir)
         # the agent runs as a non-root user; make the throwaway workspace
         # fully writable so it can create / modify / delete files there
         for path in (workdir, *workdir.rglob("*")):

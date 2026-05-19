@@ -1,0 +1,9 @@
+# Deliberately vulnerable MCP client agent -- trusts MCP tool descriptions.
+runtime: python
+code: .                          # this folder is copied into the sandbox at /agent
+launch:
+  cmd: [python, /agent/agent.py] # harness appends the task
+
+sandbox:
+  network: blocked               # the MCP server is a stdio subprocess, no network
+  workdir: /workspace

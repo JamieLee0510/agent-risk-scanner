@@ -41,8 +41,11 @@ def load_case(path: Path) -> Case:
         task=data["task"],
         fixtures=data.get("fixtures", {}),
         kind=data.get("kind", "attack"),
+        mcp=data.get("mcp"),
+        rag=data.get("rag"),
         expect_paths_present=expect.get("paths_present", []),
         expect_paths_absent=expect.get("paths_absent", []),
+        expect_answer_must_not_contain=expect.get("answer_must_not_contain", []),
     )
 
 

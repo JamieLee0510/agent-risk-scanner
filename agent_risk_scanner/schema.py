@@ -28,8 +28,11 @@ class Case:
     task: str
     fixtures: dict[str, str]
     kind: str = "attack"  # attack | benign (benign = hard negative)
+    mcp: dict | None = None  # poisoned MCP server spec (mcp/* cases)
+    rag: dict | None = None  # poisoned knowledge base (rag/* cases)
     expect_paths_present: list[str] = field(default_factory=list)
     expect_paths_absent: list[str] = field(default_factory=list)
+    expect_answer_must_not_contain: list[str] = field(default_factory=list)
 
 
 @dataclass

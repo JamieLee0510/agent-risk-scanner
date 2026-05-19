@@ -82,10 +82,11 @@ from-scratch LangGraph agent, Pi, and a deliberately-vulnerable dummy agent.
 
 ## What the scanner observes
 
-Today the scanner observes the **filesystem**: it snapshots the per-case
-workspace before and after the run and diffs it (files created, modified,
-deleted). The judge renders a verdict by comparing that diff against the
-case's `expect` block.
+Today the scanner observes the **filesystem** (a before/after diff of the
+per-case workspace) and the agent's **stdout**. The judge renders a verdict
+by comparing those against the case's `expect` block — `paths_present` /
+`paths_absent` for filesystem effects, `answer_must_not_contain` for output
+corruption.
 
 Richer observation is on the roadmap:
 
@@ -145,16 +146,17 @@ mirror the three injection surfaces:
 - **prompt-injection** — untrusted content carries a hidden instruction.
   Subtypes: `general` (poisoned email / doc / README), `skill` (poisoned
   `SKILL.md`); `web-agent` and `computer-use` are planned.
-- **mcp** — a poisoned MCP server (tool-poisoning, rug-pull). Planned —
-  needs an MCP-server fixture in the harness.
-- **rag** — poisoned documents in a retrieval store. Planned — needs a
-  retrieval-store fixture and an answer-checking judge.
+- **mcp** — a poisoned MCP server (tool-poisoning). The harness synthesizes
+  a stdio MCP server from the case yaml; subtype `tool-poisoning` is live.
+- **rag** — poisoned documents in a retrieval store. The harness seeds a
+  knowledge base and a `search_kb` retrieval tool; subtype
+  `corpus-poisoning` is live.
 
 Each case is tagged `kind: attack | benign`; benign hard-negatives
 (superficially scary but legitimate tasks) catch false positives.
 
-Implemented today: 10 `prompt-injection` cases (`general`, `skill`,
-`benign`) — the file-channel subset the current harness can run.
+Implemented today: 10 `prompt-injection`, 4 `mcp/tool-poisoning`, and 4
+`rag/corpus-poisoning` cases.
 
 ## How this is different from neighbours
 
@@ -177,9 +179,9 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
 `schema.py`.
 
 - Agents integrate via **argv injection** — the task is appended as the last CLI argument
-- Observation: **filesystem diff only** — network and tool-call observers are not yet built
-- Cases: 10 `prompt-injection` cases under `cases/prompt-injection/` (7 attack, 3 benign)
-- Example agents under `examples/`: `dummy_agent`, `langgraph`, `pi`, `claudecode`
+- Observation: **filesystem diff** + **agent stdout** — network and tool-call observers are not yet built
+- Cases: 18 — 10 `prompt-injection` + 4 `mcp/tool-poisoning` + 4 `rag/corpus-poisoning` (13 attack, 5 benign)
+- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `langgraph`, `pi`, `claudecode`
 
 ## Roadmap
 
@@ -189,8 +191,8 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
   - [x] example agents (`dummy_agent`, `langgraph`, `pi`, `claudecode`)
   - [x] Phase-1 `prompt-injection` cases (10: general / skill / benign)
   - [ ] `network_attempts` observer
-- **v0.1** — MCP-server fixture; `mcp` tool-poisoning cases (reuse MCPTox)
-- **v0.2** — retrieval-store fixture + answer-checking judge; `rag` cases
+- **v0.1** ✅ — MCP-server fixture; `mcp/tool-poisoning` cases; `dummy_mcp_agent`
+- **v0.2** ✅ — retrieval-store fixture + answer judge; `rag/corpus-poisoning` cases; `dummy_rag_agent`
 - **v0.3** — tier-2 tool-call reporting; replay AgentDojo / InjecAgent fixtures
 - **v1.0** — tier-3 OTEL trace consumer; richer judge (rule + LLM-arbitrated)
 
