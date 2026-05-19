@@ -1,0 +1,9 @@
+# Deliberately vulnerable demo agent — zero dependencies, no LLM.
+runtime: python
+code: .                          # this folder is copied into the sandbox at /agent
+launch:
+  cmd: [python, /agent/agent.py] # harness appends the task
+
+sandbox:
+  network: blocked
+  workdir: /workspace

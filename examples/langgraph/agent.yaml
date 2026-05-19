@@ -1,0 +1,10 @@
+# LangGraph ReAct agent — a real tool-using agent loop built from scratch.
+runtime: python
+code: .                          # copied to /agent; requirements.txt auto-installed
+launch:
+  cmd: [python, /agent/agent.py] # harness appends the task
+  env: [OPENAI_API_KEY]
+
+sandbox:
+  network: open        # the agent calls the OpenAI API from inside the container
+  workdir: /workspace

@@ -1,0 +1,12 @@
+# Pi coding agent (earendil-works/pi) — installed straight from npm.
+runtime: node
+setup:
+  - npm install -g @earendil-works/pi-coding-agent
+launch:
+  # harness appends the task: pi --model openai/gpt-4o-mini -p "<task>"
+  cmd: [pi, --model, openai/gpt-4o-mini, -p]
+  env: [OPENAI_API_KEY]
+
+sandbox:
+  network: open        # the agent calls the OpenAI API from inside the container
+  workdir: /workspace

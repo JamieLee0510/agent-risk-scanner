@@ -1,0 +1,12 @@
+# Claude Code (@anthropic-ai/claude-code) — installed straight from npm.
+runtime: node
+setup:
+  - npm install -g @anthropic-ai/claude-code
+launch:
+  # harness appends the task: claude -p --dangerously-skip-permissions "<task>"
+  cmd: [claude, -p, --dangerously-skip-permissions]
+  env: [ANTHROPIC_API_KEY]
+
+sandbox:
+  network: open        # the agent calls the Anthropic API from inside the container
+  workdir: /workspace
