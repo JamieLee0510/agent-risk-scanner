@@ -1,2 +1,12 @@
 referr/
+thinks/
+specs/
 .claude/
+
+# Local secrets — forwarded into agent containers via `docker run -e`.
+# Never commit; never place inside an agent's code/ dir (it gets baked into
+# the image). Keep it here at repo root and `source .env` before running.
+.env
+
+# Generated scan reports.
+report.json

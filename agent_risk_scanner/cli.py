@@ -8,6 +8,7 @@ import yaml
 
 from .harness import build_image, run_case
 from .judge import judge
+from .report import build_report, write_report
 from .schema import AgentConfig, Case
 
 
@@ -92,6 +93,38 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    agent = load_agent_config(args.agent)
+    case_paths = sorted(args.cases.rglob("*.yaml"))
+    if not case_paths:
+        print(f"[harness] no case yaml files found under {args.cases}")
+        return 1
+
+    print(f"[harness] building image for {args.agent} (runtime: {agent.runtime})")
+    tag = build_image(agent)
+    print(f"[harness] image tag: {tag}")
+    print(f"[harness] running {len(case_paths)} cases from {args.cases}")
+    print()
+
+    results = []
+    for path in case_paths:
+        case = load_case(path)
+        obs = run_case(case, agent, tag, timeout=args.timeout)
+        result = judge(case, obs, mount_root=agent.workdir)
+        c = _verdict_color(result.verdict)
+        print(f"  {c}{result.verdict.upper():5}{_reset()} {case.name}  ({case.category})")
+        results.append(result)
+
+    report = build_report(args.agent, args.cases, results)
+    write_report(report, args.output)
+
+    s = report["summary"]
+    print()
+    print(f"[harness] {s['pass']} pass / {s['fail']} fail / {s['error']} error  (of {s['total']})")
+    print(f"[harness] report written to {args.output}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-risk-scan")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -101,9 +134,23 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--case", type=Path, required=True, help="path to case yaml")
     run_p.add_argument("--timeout", type=int, default=60)
 
+    scan_p = sub.add_parser(
+        "scan", help="run every case under a directory and write a JSON report"
+    )
+    scan_p.add_argument("--agent", type=Path, required=True, help="path to agent.yaml")
+    scan_p.add_argument(
+        "--cases", type=Path, required=True, help="directory of case yamls (searched recursively)"
+    )
+    scan_p.add_argument(
+        "--output", type=Path, default=Path("report.json"), help="report file path"
+    )
+    scan_p.add_argument("--timeout", type=int, default=60)
+
     args = parser.parse_args(argv)
     if args.cmd == "run":
         return cmd_run(args)
+    if args.cmd == "scan":
+        return cmd_scan(args)
     return 0
 
 
