@@ -95,6 +95,10 @@ def _snapshot(workdir: Path) -> dict[str, bytes]:
     for path in workdir.rglob("*"):
         if path.is_file():
             rel = path.relative_to(workdir).as_posix()
+            # .mcp/ is the harness's own MCP scaffolding (server, interceptor,
+            # runtime log) -- exclude it so it never pollutes the file diff.
+            if rel == ".mcp" or rel.startswith(".mcp/"):
+                continue
             state[rel] = path.read_bytes()
     return state
 
@@ -197,6 +201,87 @@ if __name__ == "__main__":
 '''
 
 
+# The MCP interception layer (v0.3). A stdio<->stdio relay the agent connects
+# to instead of the mock server directly; it spawns server.py, forwards every
+# JSON-RPC message verbatim, and records each one to .mcp/intercept.log so the
+# harness can observe tool calls and verify the agent actually connected.
+# Fully transparent (no tampering) and stdlib-only. See
+# specs/20260521.md (section 3).
+_MCP_INTERCEPTOR_BODY = '''
+# Auto-generated stdio MCP interceptor (agent-risk-scanner harness).
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+SERVER_CMD = ["python3", os.path.join(HERE, "server.py")]
+LOG = os.path.join(HERE, "intercept.log")
+_lock = threading.Lock()
+
+
+def record(direction, msg):
+    entry = {"t": round(time.time(), 3), "dir": direction}
+    method = msg.get("method")
+    if method:
+        entry["method"] = method
+        if method == "tools/call":
+            params = msg.get("params") or {}
+            entry["tool"] = params.get("name")
+            entry["arguments"] = params.get("arguments")
+    if "id" in msg:
+        entry["id"] = msg["id"]
+    if "error" in msg:
+        entry["error"] = msg["error"]
+    with _lock:
+        with open(LOG, "a") as f:
+            f.write(json.dumps(entry) + "\\n")
+
+
+def pump(src, dst, direction):
+    """Line by line: record, then forward the raw line unchanged."""
+    for line in src:
+        stripped = line.strip()
+        if stripped:
+            try:
+                record(direction, json.loads(stripped))
+            except json.JSONDecodeError:
+                pass  # forward non-JSON too -- never break the protocol
+        try:
+            dst.write(line)
+            dst.flush()
+        except (BrokenPipeError, ValueError):
+            break
+    try:
+        dst.close()
+    except OSError:
+        pass
+
+
+def main():
+    server = subprocess.Popen(
+        SERVER_CMD, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    up = threading.Thread(
+        target=pump, args=(sys.stdin, server.stdin, "agent->server")
+    )
+    down = threading.Thread(
+        target=pump, args=(server.stdout, sys.stdout, "server->agent")
+    )
+    up.start()
+    down.start()
+    up.join()
+    server.wait()
+    down.join()
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
 def _generate_mcp_server(mcp: dict) -> str:
     """Synthesize a self-contained stdio MCP server from a case's `mcp:` spec.
 
@@ -232,12 +317,52 @@ def _rag_to_mcp(rag: dict) -> dict:
 
 
 def _materialize_mcp_server(workdir: Path, mcp: dict, mount_root: str) -> None:
-    """Write the case's poisoned MCP server + client config into .mcp/."""
+    """Write the case's poisoned MCP server, the interception layer, and the
+    client config into .mcp/.
+
+    The agent is pointed at the interceptor, not the server directly: the
+    interceptor spawns server.py and relays every JSON-RPC message, recording
+    them to .mcp/intercept.log (v0.3, see specs/20260521.md section 3).
+    """
     mcp_dir = workdir / ".mcp"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     (mcp_dir / "server.py").write_text(_generate_mcp_server(mcp))
-    config = {"command": ["python3", f"{mount_root}/.mcp/server.py"]}
+    (mcp_dir / "interceptor.py").write_text(_MCP_INTERCEPTOR_BODY)
+    config = {"command": ["python3", f"{mount_root}/.mcp/interceptor.py"]}
     (mcp_dir / "mcp.json").write_text(json.dumps(config))
+
+
+def _read_intercept_log(workdir: Path) -> dict:
+    """Parse .mcp/intercept.log into the MCP fields of an Observation.
+
+    Returns ordered tool-call names plus whether the agent completed the
+    handshake (`initialize`) and enumerated tools (`tools/list`). Missing or
+    malformed log => empty/false, treated as 'agent never connected'.
+    """
+    log = workdir / ".mcp" / "intercept.log"
+    tool_calls: list[str] = []
+    connected = False
+    listed = False
+    if not log.is_file():
+        return {"tool_calls": tool_calls, "mcp_connected": False, "mcp_tools_listed": False}
+    for line in log.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if entry.get("dir") != "agent->server":
+            continue
+        method = entry.get("method")
+        if method == "initialize":
+            connected = True
+        elif method == "tools/list":
+            listed = True
+        elif method == "tools/call" and entry.get("tool"):
+            tool_calls.append(entry["tool"])
+    return {"tool_calls": tool_calls, "mcp_connected": connected, "mcp_tools_listed": listed}
 
 
 def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) -> Observation:
@@ -288,6 +413,7 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
 
         after = _snapshot(workdir)
         d = _diff(before, after)
+        mcp = _read_intercept_log(workdir)
         return Observation(
             exit_code=exit_code,
             agent_stdout=stdout,
@@ -295,4 +421,7 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             paths_deleted=d["deleted"],
             paths_created=d["created"],
             paths_modified=d["modified"],
+            tool_calls=mcp["tool_calls"],
+            mcp_connected=mcp["mcp_connected"],
+            mcp_tools_listed=mcp["mcp_tools_listed"],
         )

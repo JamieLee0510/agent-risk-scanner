@@ -1,2 +1,0 @@
-[console_scripts]
-agent-risk-scan = agent_risk_scanner.cli:main

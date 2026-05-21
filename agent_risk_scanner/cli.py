@@ -8,7 +8,7 @@ import yaml
 
 from .harness import build_image, run_case
 from .judge import judge
-from .report import build_report, write_report
+from .report import build_report, timestamped_path, write_report
 from .schema import AgentConfig, Case
 
 
@@ -47,11 +47,17 @@ def load_case(path: Path) -> Case:
         expect_paths_present=expect.get("paths_present", []),
         expect_paths_absent=expect.get("paths_absent", []),
         expect_answer_must_not_contain=expect.get("answer_must_not_contain", []),
+        expect_forbidden_tool_calls=expect.get("forbidden_tool_calls", []),
     )
 
 
 def _verdict_color(verdict: str) -> str:
-    return {"pass": "\033[32m", "fail": "\033[31m", "error": "\033[33m"}.get(verdict, "")
+    return {
+        "pass": "\033[32m",
+        "fail": "\033[31m",
+        "error": "\033[33m",
+        "inconclusive": "\033[33m",
+    }.get(verdict, "")
 
 
 def _reset() -> str:
@@ -77,6 +83,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         print("           (the agent fell for the attack)")
     elif result.verdict == "pass":
         print("           (the agent resisted the attack, or did nothing observable)")
+    elif result.verdict == "inconclusive":
+        print("           (the agent was not exposed to the case -- no verdict)")
     for r in result.reasons:
         print(f"    - {r}")
 
@@ -85,6 +93,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"  paths deleted:  {sorted(obs.paths_deleted) or '(none)'}")
     print(f"  paths created:  {sorted(obs.paths_created) or '(none)'}")
     print(f"  paths modified: {sorted(obs.paths_modified) or '(none)'}")
+    if case.mcp or case.rag:
+        print(f"  mcp connected:  {obs.mcp_connected}  (tools listed: {obs.mcp_tools_listed})")
+        print(f"  mcp tool calls: {obs.tool_calls or '(none)'}")
     if obs.agent_stdout.strip():
         print(f"  agent stdout:   {obs.agent_stdout.strip()[:300]}")
     if obs.agent_stderr.strip():
@@ -116,12 +127,16 @@ def cmd_scan(args: argparse.Namespace) -> int:
         results.append(result)
 
     report = build_report(args.agent, args.cases, results)
-    write_report(report, args.output)
+    output = timestamped_path(args.output)
+    write_report(report, output)
 
     s = report["summary"]
     print()
-    print(f"[harness] {s['pass']} pass / {s['fail']} fail / {s['error']} error  (of {s['total']})")
-    print(f"[harness] report written to {args.output}")
+    print(
+        f"[harness] {s['pass']} pass / {s['fail']} fail / "
+        f"{s['inconclusive']} inconclusive / {s['error']} error  (of {s['total']})"
+    )
+    print(f"[harness] report written to {output}")
     return 0
 
 
@@ -142,7 +157,11 @@ def main(argv: list[str] | None = None) -> int:
         "--cases", type=Path, required=True, help="directory of case yamls (searched recursively)"
     )
     scan_p.add_argument(
-        "--output", type=Path, default=Path("report.json"), help="report file path"
+        "--output",
+        type=Path,
+        default=Path("report.json"),
+        help="report file path; a date-time stamp is inserted before the extension "
+        "(report.json -> report-20260521-143022.json)",
     )
     scan_p.add_argument("--timeout", type=int, default=60)
 

@@ -16,24 +16,34 @@ def build_report(agent_path: Path, cases_root: Path, results: list[CaseResult]) 
     `attack` case means the agent was compromised; a `fail` on a `benign` case
     is a false positive.
     """
-    summary = {"total": len(results), "pass": 0, "fail": 0, "error": 0}
+    summary = {
+        "total": len(results),
+        "pass": 0,
+        "fail": 0,
+        "error": 0,
+        "inconclusive": 0,
+    }
     case_entries = []
     for r in results:
         summary[r.verdict] += 1
         obs = r.observation
-        case_entries.append(
-            {
-                "case": r.case.name,
-                "category": r.case.category,
-                "kind": r.case.kind,
-                "verdict": r.verdict,
-                "reasons": r.reasons,
-                "exit_code": obs.exit_code,
-                "paths_deleted": sorted(obs.paths_deleted),
-                "paths_created": sorted(obs.paths_created),
-                "paths_modified": sorted(obs.paths_modified),
-            }
-        )
+        entry = {
+            "case": r.case.name,
+            "category": r.case.category,
+            "kind": r.case.kind,
+            "verdict": r.verdict,
+            "reasons": r.reasons,
+            "exit_code": obs.exit_code,
+            "paths_deleted": sorted(obs.paths_deleted),
+            "paths_created": sorted(obs.paths_created),
+            "paths_modified": sorted(obs.paths_modified),
+        }
+        # MCP interception detail, only meaningful for mcp/rag cases.
+        if r.case.mcp or r.case.rag:
+            entry["mcp_connected"] = obs.mcp_connected
+            entry["mcp_tools_listed"] = obs.mcp_tools_listed
+            entry["tool_calls"] = obs.tool_calls
+        case_entries.append(entry)
     return {
         "agent": str(agent_path),
         "cases_root": str(cases_root),
@@ -41,6 +51,13 @@ def build_report(agent_path: Path, cases_root: Path, results: list[CaseResult]) 
         "summary": summary,
         "results": case_entries,
     }
+
+
+def timestamped_path(path: Path) -> Path:
+    """Insert the current date and time into a report filename, before the
+    extension: `report.json` -> `report-20260521-143022.json`."""
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return path.with_name(f"{path.stem}-{stamp}{path.suffix}")
 
 
 def write_report(report: dict, output: Path) -> None:

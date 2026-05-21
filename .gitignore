@@ -9,4 +9,7 @@ specs/
 .env
 
 # Generated scan reports.
-report.json
+report*.json
+
+# Python build artifacts.
+*.egg-info/

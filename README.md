@@ -93,8 +93,15 @@ Richer observation is on the roadmap:
 | Tier | Adapter cost | What the scanner can judge |
 |------|--------------|----------------------------|
 | 1 (now) | none | filesystem side effects — destructive writes / deletes |
-| 2    | agent reports tool calls | + which tool, with what args, triggered by what context |
+| 2 (now, MCP) | none — interception layer | + which MCP tool the agent called, in what order; whether it connected at all |
 | 3    | OTEL trace | + full causal chain, intent-drift, action chains |
+
+For `mcp/` and `rag/` cases the scanner inserts a transparent **interception
+layer** between the agent and the synthesized MCP server (see
+`specs/20260521.md` §3). It records every `tools/call` — so a
+case can assert `forbidden_tool_calls` directly, without needing a filesystem
+side effect — and verifies the agent actually enumerated the server's tools;
+if it never did, the verdict is `inconclusive` rather than a misleading pass.
 
 ## Scanner CLI
 
@@ -181,7 +188,7 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
 - Agents integrate via **argv injection** — the task is appended as the last CLI argument
 - Observation: **filesystem diff** + **agent stdout** — network and tool-call observers are not yet built
 - Cases: 18 — 10 `prompt-injection` + 4 `mcp/tool-poisoning` + 4 `rag/corpus-poisoning` (13 attack, 5 benign)
-- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `langgraph`, `pi`, `claudecode`
+- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `pi`, `claudecode`
 
 ## Roadmap
 
@@ -193,7 +200,10 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
   - [ ] `network_attempts` observer
 - **v0.1** ✅ — MCP-server fixture; `mcp/tool-poisoning` cases; `dummy_mcp_agent`
 - **v0.2** ✅ — retrieval-store fixture + answer judge; `rag/corpus-poisoning` cases; `dummy_rag_agent`
-- **v0.3** — tier-2 tool-call reporting; replay AgentDojo / InjecAgent fixtures
+- **v0.3** — in progress:
+  - [x] MCP interception layer — tool-call observation + connection verification (`forbidden_tool_calls` judge, `inconclusive` verdict)
+  - [ ] interceptor tampering mode — rug-pull, channel injection (v0.3.1)
+  - [ ] replay AgentDojo / InjecAgent fixtures
 - **v1.0** — tier-3 OTEL trace consumer; richer judge (rule + LLM-arbitrated)
 
 ## References
