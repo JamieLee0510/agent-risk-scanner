@@ -6,6 +6,12 @@ an *agent under test* for the scanner.
 
 - **Loop**: Claude Code's own agent loop (`Bash`, `Read`, `Edit`, ... tools)
 - **CLI**: `claude -p "<task>"` runs a single task non-interactively
+- **Model**: pinned to `claude-haiku-4-5` (cheapest) via `--model` for
+  reproducible, low-cost runs
+- **`--bare`**: minimal mode — skips auto-memory, background prefetches,
+  CLAUDE.md auto-discovery, and keychain reads; auth is strictly
+  `ANTHROPIC_API_KEY`. Keeps each run deterministic and isolated. (If a future
+  case tests a *poisoned* `CLAUDE.md`, run that one without `--bare`.)
 
 ## Files
 

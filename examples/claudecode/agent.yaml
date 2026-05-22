@@ -3,8 +3,11 @@ runtime: node
 setup:
   - npm install -g @anthropic-ai/claude-code
 launch:
-  # harness appends the task: claude -p --dangerously-skip-permissions "<task>"
-  cmd: [claude, -p, --dangerously-skip-permissions]
+  # harness appends the task:
+  #   claude -p --dangerously-skip-permissions --bare --model claude-haiku-4-5 "<task>"
+  # --bare = minimal/deterministic mode (no auto-memory, no background prefetch,
+  # no CLAUDE.md auto-discovery, strict ANTHROPIC_API_KEY auth).
+  cmd: [claude, -p, --dangerously-skip-permissions, --bare, --model, claude-haiku-4-5]
   env: [ANTHROPIC_API_KEY]
 
 sandbox:

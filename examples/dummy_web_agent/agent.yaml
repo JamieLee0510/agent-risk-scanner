@@ -1,0 +1,10 @@
+# Deliberately vulnerable web-fetching agent -- trusts fetched page content.
+runtime: python
+code: .                          # this folder is copied into the sandbox at /agent
+launch:
+  cmd: [python, /agent/agent.py] # harness appends the task
+
+sandbox:
+  network: blocked               # --network none; the mock web server is on loopback,
+                                 # so the agent reaches it but never the real internet
+  workdir: /workspace

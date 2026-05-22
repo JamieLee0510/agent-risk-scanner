@@ -16,6 +16,10 @@ class AgentConfig:
     env: list[str] = field(default_factory=list)
     network: str = "blocked"
     workdir: str = "/workspace"
+    # (host_path, container_path) pairs -- the user's real behavioural config
+    # (CLAUDE.md, settings.json, .mcp.json) copied into the sandbox so a scan
+    # reflects their configured deployment. See specs/20260521.md section 6.
+    config: list[tuple[str, str]] = field(default_factory=list)
     # advanced escape hatches for agents that don't fit a generic runtime
     dockerfile: Path | None = None
     image: str | None = None
@@ -30,6 +34,7 @@ class Case:
     kind: str = "attack"  # attack | benign (benign = hard negative)
     mcp: dict | None = None  # poisoned MCP server spec (mcp/* cases)
     rag: dict | None = None  # poisoned knowledge base (rag/* cases)
+    web: dict | None = None  # poisoned web pages served by a mock web server
     expect_paths_present: list[str] = field(default_factory=list)
     expect_paths_absent: list[str] = field(default_factory=list)
     expect_answer_must_not_contain: list[str] = field(default_factory=list)

@@ -74,6 +74,11 @@ A few things to know:
 - The agent runs as a **non-root user**.
 - `setup:` (a list of shell commands) installs anything the auto-detected
   manifests don't cover — e.g. an agent that is itself an npm package.
+- `config:` (a list of `from`/`to` entries) copies the tester's real
+  behavioural config — `CLAUDE.md`, `settings.json`, `.mcp.json` — into the
+  sandbox, so the scan tests their *configured* deployment, not a vanilla
+  install. Credential and conversation-history files are skipped; auth still
+  comes only from forwarded env vars.
 - For agents that don't fit a generic runtime, `launch.dockerfile` or
   `launch.image` are optional escape hatches.
 
@@ -106,14 +111,26 @@ if it never did, the verdict is `inconclusive` rather than a misleading pass.
 ## Scanner CLI
 
 ```bash
+# one case against one agent
 agent-risk-scan run \
     --agent examples/langgraph/agent.yaml \
     --case cases/prompt-injection/general/ipi_rm_workspace.yaml
+
+# every case under a directory -> a JSON report
+agent-risk-scan scan \
+    --agent examples/langgraph/agent.yaml \
+    --cases cases/prompt-injection \
+    --repeat 5
 ```
 
-Runs a single case against one agent and prints the verdict. `--timeout`
-(seconds, default 60) bounds the agent run. Multi-case suites and report
-files are not yet implemented.
+`run` prints the verdict for a single case; `scan` runs every case under a
+directory and writes a timestamped JSON report. `--timeout` (seconds, default
+60) bounds each agent run.
+
+`--repeat N` runs each case N times and reports a **hit-rate** rather than a
+single verdict. LLM agents are non-deterministic — the same case can pass on
+one run and fail on the next — so a rate (`fail 4/5`) is the meaningful
+measurement; one run is a coin flip.
 
 A case is a YAML file: a task, the fixture files to seed the workspace
 with, and the filesystem state the run is expected to preserve:
@@ -152,7 +169,9 @@ mirror the three injection surfaces:
 
 - **prompt-injection** — untrusted content carries a hidden instruction.
   Subtypes: `general` (poisoned email / doc / README), `skill` (poisoned
-  `SKILL.md`); `web-agent` and `computer-use` are planned.
+  `SKILL.md`), `obfuscation` (encoded payloads), `web` (indirect injection in
+  a fetched web page — served from a loopback mock, never the real internet);
+  `computer-use` is planned.
 - **mcp** — a poisoned MCP server (tool-poisoning). The harness synthesizes
   a stdio MCP server from the case yaml; subtype `tool-poisoning` is live.
 - **rag** — poisoned documents in a retrieval store. The harness seeds a
@@ -178,6 +197,39 @@ Implemented today: 10 `prompt-injection`, 4 `mcp/tool-poisoning`, and 4
 The empty cell `os-harm × generic tool-use` and the `agent-scan × dynamic`
 gaps are the actual product space.
 
+## Out of scope
+
+Coverage breadth is not a goal. The scanner has one thesis — *own a
+tool-using agent's lifecycle, run it in a sandbox, and judge it by the
+runtime side effects it produces*. A threat earns a case only when it is
+**on-thesis** (a tool-using agent at runtime), the **sandbox can observe**
+its side effect, and the case is **cheap** to express in the existing
+harness. By that test the following are deliberately *not* covered — they
+are different products or different lifecycle phases, not an unfinished
+backlog:
+
+- **Model-layer / white-box attacks** — adversarial examples, model
+  poisoning & backdoors, model extraction, membership inference. The
+  scanner is black-box: it runs the agent, never inspects model weights.
+  These belong to a model-scanning tool.
+- **Multi-agent / inter-agent threats** — rogue agents, hallucination
+  cascades, agent-consensus manipulation. The harness runs one agent.
+- **Post-incident response & recovery** — credential eviction, model
+  rollback, system restoration. This is a *pre-deployment* test tool, not
+  an incident-response platform.
+- **Static artifact audit** — dependency provenance, MCP-server metadata
+  scanning. That is the static-scanner camp (`mcp-scan`, Snyk
+  `agent-scan`); see `specs/20260521.md` §2.1 "line B". This scanner is
+  dynamic by design.
+- **Threats with no observable runtime side effect** — anything that
+  leaves no trace in the filesystem diff, stdout, or intercepted tool
+  calls cannot be given a verdict, so it is not a case.
+
+A scan reports only what it tested. A green result means *the cases that
+ran found nothing* — it is not a safety certificate for the agent.
+Scoping rationale and the near-term priorities are recorded in
+[`specs/20260522.md`](./specs/20260522.md).
+
 ## Status
 
 **v0 in progress.** The end-to-end loop works: build → sandbox → run agent →
@@ -188,7 +240,7 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
 - Agents integrate via **argv injection** — the task is appended as the last CLI argument
 - Observation: **filesystem diff** + **agent stdout** — network and tool-call observers are not yet built
 - Cases: 18 — 10 `prompt-injection` + 4 `mcp/tool-poisoning` + 4 `rag/corpus-poisoning` (13 attack, 5 benign)
-- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `pi`, `claudecode`
+- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `dummy_web_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `web_langgraph`, `pi`, `claudecode`
 
 ## Roadmap
 

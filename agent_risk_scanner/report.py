@@ -7,48 +7,52 @@ from pathlib import Path
 from .schema import CaseResult
 
 
-def build_report(agent_path: Path, cases_root: Path, results: list[CaseResult]) -> dict:
-    """Aggregate a list of per-case results into a serializable report dict.
+def build_report(
+    agent_path: Path, cases_root: Path, case_runs: list[list[CaseResult]]
+) -> dict:
+    """Aggregate per-case results into a serializable report dict.
 
-    `summary` counts cases by verdict. Each `results` entry carries the verdict
-    plus enough observation detail to see why -- the reasons and the filesystem
-    diff. `kind` is kept so a reader can interpret a verdict: a `fail` on an
-    `attack` case means the agent was compromised; a `fail` on a `benign` case
-    is a false positive.
+    `case_runs` is one inner list per case, holding that case's N repeated
+    runs. Each report entry carries the verdict distribution across those runs
+    plus a `fail_rate` -- LLM agents are non-deterministic, so a hit-rate is
+    the meaningful measurement, not a single verdict. `kind` is kept so a
+    reader can interpret a fail: on an `attack` case it means the agent was
+    compromised; on a `benign` case it is a false positive.
     """
-    summary = {
-        "total": len(results),
-        "pass": 0,
-        "fail": 0,
-        "error": 0,
-        "inconclusive": 0,
-    }
     case_entries = []
-    for r in results:
-        summary[r.verdict] += 1
-        obs = r.observation
+    total_runs = 0
+    cases_with_fail = 0
+    for runs in case_runs:
+        n = len(runs)
+        total_runs += n
+        verdicts = [r.verdict for r in runs]
+        counts = {v: verdicts.count(v) for v in ("pass", "fail", "inconclusive", "error")}
+        if counts["fail"]:
+            cases_with_fail += 1
+        case = runs[0].case
         entry = {
-            "case": r.case.name,
-            "category": r.case.category,
-            "kind": r.case.kind,
-            "verdict": r.verdict,
-            "reasons": r.reasons,
-            "exit_code": obs.exit_code,
-            "paths_deleted": sorted(obs.paths_deleted),
-            "paths_created": sorted(obs.paths_created),
-            "paths_modified": sorted(obs.paths_modified),
+            "case": case.name,
+            "category": case.category,
+            "kind": case.kind,
+            "runs": n,
+            "verdict_counts": counts,
+            "fail_rate": round(counts["fail"] / n, 3) if n else 0.0,
+            "reasons": sorted({reason for r in runs for reason in r.reasons}),
         }
-        # MCP interception detail, only meaningful for mcp/rag cases.
-        if r.case.mcp or r.case.rag:
-            entry["mcp_connected"] = obs.mcp_connected
-            entry["mcp_tools_listed"] = obs.mcp_tools_listed
-            entry["tool_calls"] = obs.tool_calls
+        # MCP interception detail (union across runs), only for mcp/rag cases.
+        if case.mcp or case.rag:
+            entry["tool_calls"] = sorted({t for r in runs for t in r.observation.tool_calls})
         case_entries.append(entry)
     return {
         "agent": str(agent_path),
         "cases_root": str(cases_root),
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "summary": summary,
+        "summary": {
+            "cases": len(case_runs),
+            "runs_per_case": len(case_runs[0]) if case_runs else 0,
+            "total_runs": total_runs,
+            "cases_with_fail": cases_with_fail,
+        },
         "results": case_entries,
     }
 

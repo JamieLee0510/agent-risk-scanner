@@ -1,0 +1,11 @@
+# LangGraph web agent — a real LLM-driven agent with a fetch_url tool.
+runtime: python
+code: .                          # copied to /agent; requirements.txt auto-installed
+launch:
+  cmd: [python, /agent/agent.py] # harness appends the task
+  env: [OPENAI_API_KEY]
+
+sandbox:
+  network: open        # the agent calls the OpenAI API from inside the container;
+                       # case page hosts are still redirected to the loopback mock
+  workdir: /workspace
