@@ -50,7 +50,7 @@ def build_report(
     return {
         "agent": str(agent_path),
         "cases_root": str(cases_root),
-        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "generated_at": datetime.datetime.now(datetime.UTC).isoformat(),
         "summary": {
             "cases": len(case_runs),
             "runs_per_case": len(case_runs[0]) if case_runs else 0,

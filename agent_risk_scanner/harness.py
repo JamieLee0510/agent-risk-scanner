@@ -493,7 +493,10 @@ def _generate_web_certs(hosts: list[str]) -> dict[str, str]:
     san = ",".join(f"DNS:{h}" for h in hosts) or "DNS:localhost"
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
-        _run = lambda *a: subprocess.run(list(a), check=True, capture_output=True)
+
+        def _run(*a):
+            return subprocess.run(list(a), check=True, capture_output=True)
+
         _run("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
              "-keyout", str(d / "ca.key"), "-out", str(d / "ca.pem"),
              "-days", "1", "-subj", "/CN=agent-risk-scanner-mock-ca")

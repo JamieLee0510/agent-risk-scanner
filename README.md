@@ -1,5 +1,10 @@
 # Agent Risk Scanner
 
+[![CI](https://github.com/JamieLee0510/agent-risk-scanner/actions/workflows/ci.yml/badge.svg)](https://github.com/JamieLee0510/agent-risk-scanner/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+
 **Sandboxed, bring-your-own-agent (BYOA) security scanner for tool-using AI agents.**
 
 Existing agent-security work tends to fall into one of two camps:
@@ -103,11 +108,13 @@ Richer observation is on the roadmap:
 | 3    | OTEL trace | + full causal chain, intent-drift, action chains |
 
 For `mcp/` cases the scanner inserts a transparent **interception layer**
-between the agent and the synthesized MCP server (see `specs/20260521.md`
-§3). It records every `tools/call` — so a case can assert
-`forbidden_tool_calls` directly, without needing a filesystem side effect —
-and verifies the agent actually enumerated the server's tools;
-if it never did, the verdict is `inconclusive` rather than a misleading pass.
+between the agent and the synthesized MCP server: a stdio-to-stdio relay
+the agent connects to instead of the mock server directly. It forwards
+every JSON-RPC message verbatim and records each `tools/call` to a log,
+so a case can assert `forbidden_tool_calls` directly — no filesystem side
+effect required. The interceptor also verifies the agent actually
+enumerated the server's tools; if it never did, the verdict is
+`inconclusive` rather than a misleading pass.
 
 ## Scanner CLI
 
@@ -223,8 +230,7 @@ backlog:
   an incident-response platform.
 - **Static artifact audit** — dependency provenance, MCP-server metadata
   scanning. That is the static-scanner camp (`mcp-scan`, Snyk
-  `agent-scan`); see `specs/20260521.md` §2.1 "line B". This scanner is
-  dynamic by design.
+  `agent-scan`); this scanner is dynamic by design.
 - **Threats with no observable runtime side effect** — anything that
   leaves no trace in the filesystem diff, stdout, or intercepted tool
   calls cannot be given a verdict, so it is not a case.
@@ -236,29 +242,27 @@ backlog:
 
 A scan reports only what it tested. A green result means *the cases that
 ran found nothing* — it is not a safety certificate for the agent.
-Scoping rationale and the near-term priorities are recorded in
-[`specs/20260522.md`](./specs/20260522.md).
 
 ## Status
 
-**v0 in progress.** The end-to-end loop works: build → sandbox → run agent →
-filesystem diff → judge. Implemented under `agent_risk_scanner/` —
-`harness.py` (Docker harness), `judge.py` (filesystem-diff judge), `cli.py`,
-`schema.py`.
+**v0.1 — alpha.** The end-to-end loop works: build → sandbox → run agent
+→ observe (filesystem + MCP intercept + optional network proxy) → judge.
+Implemented under `agent_risk_scanner/` — `harness.py` (Docker harness),
+`judge.py` (multi-channel judge), `report.py`, `cli.py`, `schema.py`.
 
 - Agents integrate via **argv injection** — the task is appended as the last CLI argument
-- Observation: **filesystem diff** + **agent stdout** — network and tool-call observers are not yet built
-- Cases: 38 — `prompt-injection` (general / skill / obfuscation / web / benign) + `mcp/tool-poisoning` + `agentic/excessive-agency`
+- Observation: **filesystem diff** + **agent stdout** + **MCP tool-call interception** + opt-in **HTTP/S egress observer**
+- Cases: 39 — `prompt-injection` (general / skill / obfuscation / web / benign) + `mcp/tool-poisoning` + `agentic/excessive-agency`
 - Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_web_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `web_langgraph`, `pi`, `claudecode`
 
 ## Roadmap
 
-- **v0** — minimum end-to-end loop:
+- **v0** ✅ — minimum end-to-end loop:
   - [x] Docker harness, argv-injection protocol
   - [x] `file_diff` observer + filesystem-diff judge
   - [x] example agents (`dummy_agent`, `langgraph`, `pi`, `claudecode`)
   - [x] Phase-1 `prompt-injection` cases (10: general / skill / benign)
-  - [ ] `network_attempts` observer
+  - [x] `network_attempts` observer (opt-in HTTP/S proxy)
 - **v0.1** ✅ — MCP-server fixture; `mcp/tool-poisoning` cases; `dummy_mcp_agent`
 - ~~**v0.2** — RAG corpus-poisoning~~ — **removed 2026-05-24**: real agents'
   retrieval has no standard intercept protocol, see Out of scope
@@ -268,7 +272,11 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
   - [ ] replay AgentDojo / InjecAgent fixtures
 - **v1.0** — tier-3 OTEL trace consumer; richer judge (rule + LLM-arbitrated)
 
-## References
+## Contributing
 
-- Design notes: [`design_20260507.md`](./design_20260507.md)
-- Discussion notes: [`discussed-with-ai.md`](./discussed-with-ai.md)
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Security issues should be
+reported per [SECURITY.md](./SECURITY.md).
+
+## License
+
+Apache-2.0 — see [LICENSE](./LICENSE).

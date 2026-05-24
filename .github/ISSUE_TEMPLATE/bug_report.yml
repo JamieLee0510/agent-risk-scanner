@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in the scanner is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Not for findings against your agent** — those are the scanner's
+        intended output, not a bug. See SECURITY.md for what counts as a
+        scanner vulnerability.
+
+  - type: input
+    id: version
+    attributes:
+      label: Scanner version / commit
+      placeholder: "0.1.0  or  git sha"
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Minimal `agent.yaml` + case yaml + the exact command you ran.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour (verdict / output)
+
+  - type: input
+    id: env
+    attributes:
+      label: OS + Docker version
+      placeholder: "macOS 14.3 / Docker 27.0.3"

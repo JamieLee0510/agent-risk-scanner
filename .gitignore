@@ -1,5 +1,4 @@
 referr/
-thinks/
 specs/
 .claude/
 
@@ -11,5 +10,17 @@ specs/
 # Generated scan reports.
 report*.json
 
-# Python build artifacts.
+# Python / tooling caches and build artifacts.
 *.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+.venv/
+venv/
+dist/
+build/
+
+# OS junk.
+.DS_Store

@@ -1,0 +1,47 @@
+name: New case proposal
+description: Propose a new attack case (or benign hard-negative).
+labels: [case]
+body:
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat being modeled
+      description: One paragraph. What attack? Which framework (OWASP LLM / Agentic / MITRE ATLAS) does it map to?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: family
+    attributes:
+      label: Case family
+      options:
+        - prompt-injection/general
+        - prompt-injection/skill
+        - prompt-injection/obfuscation
+        - prompt-injection/web
+        - mcp/tool-poisoning
+        - agentic/excessive-agency
+        - (new family — explain below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: observability
+    attributes:
+      label: How will the harness observe success?
+      description: filesystem diff / forbidden tool call / forbidden host / canary string. If none of these, the case can't be judged today — say so.
+    validations:
+      required: true
+
+  - type: input
+    id: source
+    attributes:
+      label: Source / inspiration
+      placeholder: "paper / benchmark / repo / self-authored"
+
+  - type: checkboxes
+    attributes:
+      label: Checklist
+      options:
+        - label: I've paired this attack case with a benign hard-negative (or there's no plausible false-positive shape).
+        - label: I've checked the README "Out of scope" section.

@@ -1,8 +1,37 @@
 [project]
 name = "agent-risk-scanner"
-version = "0.0.1"
-description = "Sandboxed BYOA security scanner for tool-using AI agents"
+version = "0.1.0"
+description = "Sandboxed bring-your-own-agent (BYOA) security scanner for tool-using AI agents"
+readme = "README.md"
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
+authors = [
+    { name = "Jamie Lee", email = "walker200665@gmail.com" },
+]
+keywords = [
+    "ai-safety",
+    "ai-security",
+    "agent",
+    "llm-agent",
+    "prompt-injection",
+    "mcp",
+    "red-team",
+    "sandbox",
+    "security-scanner",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Testing",
+]
 dependencies = [
     "pyyaml>=6",
 ]
@@ -10,7 +39,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.5",
 ]
+
+[project.urls]
+Homepage = "https://github.com/JamieLee0510/agent-risk-scanner"
+Repository = "https://github.com/JamieLee0510/agent-risk-scanner"
+Issues = "https://github.com/JamieLee0510/agent-risk-scanner/issues"
+Changelog = "https://github.com/JamieLee0510/agent-risk-scanner/blob/main/CHANGELOG.md"
 
 [project.scripts]
 agent-risk-scan = "agent_risk_scanner.cli:main"
@@ -21,3 +57,28 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["agent_risk_scanner*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["referr", "thinks", "specs", "examples"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # bugbear
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "E501",  # long lines -- README/string-bodies in harness.py legitimately exceed
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B"]
