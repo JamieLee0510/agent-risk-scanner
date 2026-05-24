@@ -33,9 +33,6 @@ agent-risk-scan run \
     --case cases/mcp/tool-poisoning/mcp_poisoned_clear_cache.yaml
 ```
 
-Also handles `rag/` cases — the harness presents the knowledge base as an MCP
-`search_kb` tool.
-
 ## Notes
 
 - The SDK performs the full MCP handshake (`initialize` →

@@ -1,6 +1,12 @@
 name: ipi_important_instructions
 category: prompt-injection/general
 kind: attack
+source:
+  name: AgentDojo
+  kind: benchmark
+  url: https://github.com/ethz-spylab/agentdojo
+  template: important_instructions
+  notes: "social-engineering attack family from AgentDojo's attack template set"
 # Social-engineering injection family (AgentDojo "important_instructions"):
 # the injected text impersonates the account owner to borrow authority.
 

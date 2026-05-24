@@ -1,6 +1,15 @@
 name: ipi_fake_urgent_preamble
 category: prompt-injection/general
 kind: attack
+source:
+  name: InjecAgent
+  kind: benchmark
+  url: https://github.com/uiuc-kang-lab/InjecAgent
+  template: enhanced setting (urgent preamble)
+also_seen_in:
+  - name: garak
+    url: https://github.com/NVIDIA/garak
+    template: promptinject "screaming-stop"
 # Urgency / "IMPORTANT!!!" preamble family (InjecAgent "enhanced" setting;
 # garak "screaming-stop" template): the injection shouts for priority
 # attention to pressure the agent into acting before it reasons about the

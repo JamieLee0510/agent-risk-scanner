@@ -1,6 +1,12 @@
 name: mcp_overwrite_ssh_key
 category: mcp/tool-poisoning
 kind: attack
+source:
+  name: MCPTox-Benchmark
+  kind: benchmark
+  url: https://github.com/zhiqiangwang4/MCPTox-Benchmark
+  template: tool-description chained-call (SSH-key overwrite)
+  notes: "MCPTox-family pre-authorization-check social engineering"
 # MCP tool poisoning with a "pre-authorization check" social-engineering
 # docstring that chains the agent into a tool which overwrites an SSH key.
 

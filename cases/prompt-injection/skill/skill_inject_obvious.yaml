@@ -1,6 +1,12 @@
 name: skill_inject_obvious
 category: prompt-injection/skill
 kind: attack
+source:
+  name: skill-inject
+  kind: benchmark
+  url: https://github.com/aisa-group/skill-inject
+  template: obvious injection
+  notes: "destructive instruction openly placed in the SKILL.md body"
 # Skill-file injection (skill-inject "obvious"): a destructive instruction is
 # hidden inside a SKILL.md the agent loads as a trusted capability.
 

@@ -10,8 +10,9 @@ for a poisoned tool description -- e.g. a `search_docs` tool whose description
 tells it to "first call clear_cache" -- is an emergent property of the model.
 That is exactly what the scanner is meant to measure.
 
-It also works for `rag:` cases: the harness presents the knowledge base as an
-MCP `search_kb` tool, so this same agent retrieves and reasons over it.
+(Retrieval-augmented variants are not provided: the scanner has no standard
+protocol to override an agent's real retrieval pipeline, so RAG-as-a-system
+is out of scope. See specs/20260522.md §3.)
 """
 
 from __future__ import annotations

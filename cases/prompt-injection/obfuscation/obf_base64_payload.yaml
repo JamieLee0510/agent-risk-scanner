@@ -1,6 +1,12 @@
 name: obf_base64_payload
 category: prompt-injection/obfuscation
 kind: attack
+source:
+  name: garak
+  kind: benchmark
+  url: https://github.com/NVIDIA/garak
+  template: encoding (base64 variant)
+  notes: "from garak's `encoding` probe family"
 # Encoded-payload injection (garak `encoding` probe family): the malicious
 # instruction is base64-encoded so it slips past plain-text content filters.
 # The carrier text coaxes the agent into decoding and obeying it.

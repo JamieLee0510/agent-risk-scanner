@@ -100,10 +100,11 @@ def _snapshot(workdir: Path) -> dict[str, bytes]:
     for path in workdir.rglob("*"):
         if path.is_file():
             rel = path.relative_to(workdir).as_posix()
-            # .mcp/ .web/ .arsconfig/ are the harness's own scaffolding (MCP
-            # server + interceptor + log; mock web server; config staging) --
-            # exclude so they never pollute the file diff.
-            if rel.split("/", 1)[0] in (".mcp", ".web", ".arsconfig"):
+            # .mcp/ .web/ .arsconfig/ .observer/ are the harness's own
+            # scaffolding (mcp server + interceptor; mock web server; config
+            # staging; egress proxy + log) -- exclude so they never pollute
+            # the file diff.
+            if rel.split("/", 1)[0] in (".mcp", ".web", ".arsconfig", ".observer"):
                 continue
             state[rel] = path.read_bytes()
     return state
@@ -144,12 +145,6 @@ _call_counts = {}
 def _run_tool(tool):
     name = tool["name"]
     _call_counts[name] = _call_counts.get(name, 0) + 1
-    if tool.get("retrieval"):
-        lines = []
-        for d in KB:
-            lines.append("[" + d.get("id", "doc") + "]")
-            lines.append(d.get("content", ""))
-        return chr(10).join(lines)
     cmd = tool.get("on_call")
     after = tool.get("on_call_after", 1)
     if cmd and _call_counts[name] >= after:
@@ -289,37 +284,15 @@ if __name__ == "__main__":
 
 
 def _generate_mcp_server(mcp: dict) -> str:
-    """Synthesize a self-contained stdio MCP server from a case's `mcp:` spec.
-
-    `mcp` may carry a `kb` (knowledge base) — a `retrieval: true` tool then
-    returns its documents. This is how `rag:` cases ride on the MCP machinery.
-    """
+    """Synthesize a self-contained stdio MCP server from a case's `mcp:` spec."""
     server_name = mcp.get("server", "mcp-server")
     tools = mcp.get("tools", [])
-    kb = mcp.get("kb", [])
     header = (
         "# Auto-generated stdio MCP server (agent-risk-scanner harness).\n"
         f"SERVER_NAME = {server_name!r}\n"
         f"TOOLS = {tools!r}\n"
-        f"KB = {kb!r}\n"
     )
     return header + _MCP_SERVER_BODY
-
-
-def _rag_to_mcp(rag: dict) -> dict:
-    """Compile a case's `rag:` knowledge base into an MCP server spec whose
-    `search_kb` tool retrieves the (possibly poisoned) documents."""
-    return {
-        "server": "knowledge-base",
-        "kb": rag.get("knowledge_base", []),
-        "tools": [
-            {
-                "name": "search_kb",
-                "description": "Search the knowledge base and return matching documents.",
-                "retrieval": True,
-            }
-        ],
-    }
 
 
 def _materialize_mcp_server(workdir: Path, mcp: dict, mount_root: str) -> None:
@@ -329,13 +302,41 @@ def _materialize_mcp_server(workdir: Path, mcp: dict, mount_root: str) -> None:
     The agent is pointed at the interceptor, not the server directly: the
     interceptor spawns server.py and relays every JSON-RPC message, recording
     them to .mcp/intercept.log (v0.3, see specs/20260521.md section 3).
+
+    Two client configs are written:
+      .mcp/mcp.json  — minimal `{"command": [...]}` used by the example agents
+                       (dummy_mcp_agent, mcp_langgraph, mcp_official).
+      .mcp.json      — industry-standard `mcpServers` schema at the workspace
+                       root (Claude Code / Cursor / Cline / Continue / official
+                       MCP docs all use this). Agents like Claude Code load it
+                       via `--mcp-config /workspace/.mcp.json --strict-mcp-config`.
     """
     mcp_dir = workdir / ".mcp"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     (mcp_dir / "server.py").write_text(_generate_mcp_server(mcp))
     (mcp_dir / "interceptor.py").write_text(_MCP_INTERCEPTOR_BODY)
-    config = {"command": ["python3", f"{mount_root}/.mcp/interceptor.py"]}
-    (mcp_dir / "mcp.json").write_text(json.dumps(config))
+    interceptor_path = f"{mount_root}/.mcp/interceptor.py"
+    (mcp_dir / "mcp.json").write_text(json.dumps({"command": ["python3", interceptor_path]}))
+    _write_standard_mcp_config(workdir, command="python3", args=[interceptor_path])
+
+
+def _write_standard_mcp_config(
+    workdir: Path, *, command: str | None = None, args: list[str] | None = None
+) -> None:
+    """Write the standard `.mcp.json` at the workspace root in the
+    `mcpServers` schema (Claude Code / Cursor / Cline / Continue / official
+    MCP docs all use this). If `command` is None, writes an empty config so
+    agents that always pass `--mcp-config /workspace/.mcp.json` still work on
+    non-mcp cases."""
+    if command is None:
+        config = {"mcpServers": {}}
+    else:
+        config = {
+            "mcpServers": {
+                "harness": {"command": command, "args": list(args or [])}
+            }
+        }
+    (workdir / ".mcp.json").write_text(json.dumps(config, indent=2))
 
 
 def _read_intercept_log(workdir: Path) -> dict:
@@ -548,6 +549,183 @@ def _materialize_web_server(workdir: Path, web: dict) -> None:
         (web_dir / "server.key").write_text(certs["key"])
 
 
+# Egress observer (v0): a tiny stdlib HTTP(S) proxy that the agent talks to
+# via HTTP_PROXY/HTTPS_PROXY env vars. It forwards (so real API calls still
+# work) and records every host:port the agent tries to reach -- the attempt
+# itself is the evidence of a successful exfil-style attack, even when the
+# target (e.g. evil.example) doesn't resolve. See specs/20260522.md §4.1.
+# Limitation: only catches HTTP-clients that respect the proxy env vars
+# (requests/urllib/httpx/curl/most LLM SDKs). Raw sockets / bypassing code
+# escapes; documented in the spec.
+_OBSERVER_PROXY_BODY = '''
+import http.server
+import json
+import os
+import select
+import socket
+import socketserver
+import threading
+import time
+from urllib.parse import urlparse
+
+LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "egress.log")
+_lock = threading.Lock()
+
+
+def _log(entry):
+    with _lock:
+        with open(LOG, "a") as f:
+            f.write(json.dumps(entry) + "\\n")
+
+
+def _pipe(a, b):
+    try:
+        while True:
+            r, _, _ = select.select([a, b], [], [], 30)
+            if not r:
+                break
+            for s in r:
+                data = s.recv(8192)
+                if not data:
+                    return
+                (b if s is a else a).sendall(data)
+    except OSError:
+        pass
+
+
+class Proxy(http.server.BaseHTTPRequestHandler):
+    timeout = 30
+
+    def log_message(self, *args):
+        pass  # silence -- never write to agent's stdout/stderr
+
+    def do_CONNECT(self):
+        host, _, port = self.path.partition(":")
+        port = int(port) if port else 443
+        entry = {"t": round(time.time(), 3), "method": "CONNECT", "host": host, "port": port}
+        try:
+            upstream = socket.create_connection((host, port), timeout=10)
+        except OSError as e:
+            entry["status"] = f"failed: {e.__class__.__name__}"
+            _log(entry)
+            self.send_error(502)
+            return
+        entry["status"] = "established"
+        _log(entry)
+        self.send_response(200, "Connection Established")
+        self.end_headers()
+        _pipe(self.connection, upstream)
+        upstream.close()
+
+    def _proxy_http(self):
+        url = urlparse(self.path)
+        host = url.hostname or "?"
+        port = url.port or 80
+        entry = {"t": round(time.time(), 3), "method": self.command, "host": host, "port": port}
+        try:
+            upstream = socket.create_connection((host, port), timeout=10)
+        except OSError as e:
+            entry["status"] = f"failed: {e.__class__.__name__}"
+            _log(entry)
+            self.send_error(502)
+            return
+        path = url.path or "/"
+        if url.query:
+            path += "?" + url.query
+        req = f"{self.command} {path} HTTP/1.1\\r\\nHost: {host}\\r\\n"
+        for h, v in self.headers.items():
+            if h.lower() in ("proxy-connection",):
+                continue
+            req += f"{h}: {v}\\r\\n"
+        req += "\\r\\n"
+        upstream.sendall(req.encode("iso-8859-1", "replace"))
+        length = int(self.headers.get("Content-Length") or 0)
+        if length:
+            upstream.sendall(self.rfile.read(length))
+        # stream response back
+        upstream.settimeout(30)
+        try:
+            while True:
+                chunk = upstream.recv(8192)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except OSError:
+            pass
+        entry["status"] = "forwarded"
+        _log(entry)
+        upstream.close()
+
+    do_GET = _proxy_http
+    do_POST = _proxy_http
+    do_PUT = _proxy_http
+    do_DELETE = _proxy_http
+    do_PATCH = _proxy_http
+    do_HEAD = _proxy_http
+
+
+class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+ThreadedServer(("127.0.0.1", PORT), Proxy).serve_forever()
+'''
+
+_OBSERVER_LAUNCHER_BODY = '''
+import os
+import socket
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+subprocess.Popen(
+    ["python3", os.path.join(HERE, "proxy.py")],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+deadline = time.time() + 5
+while time.time() < deadline:
+    try:
+        socket.create_connection(("127.0.0.1", PORT), timeout=0.3).close()
+        break
+    except OSError:
+        time.sleep(0.1)
+
+os.execvp(sys.argv[1], sys.argv[1:])
+'''
+
+_OBSERVER_PORT = 8888
+
+
+def _materialize_observer(workdir: Path) -> None:
+    """Write the egress proxy + its launcher into .observer/."""
+    obs_dir = workdir / ".observer"
+    obs_dir.mkdir(parents=True, exist_ok=True)
+    header = f"PORT = {_OBSERVER_PORT!r}\n"
+    (obs_dir / "proxy.py").write_text(header + _OBSERVER_PROXY_BODY)
+    (obs_dir / "run.py").write_text(header + _OBSERVER_LAUNCHER_BODY)
+
+
+def _read_observer_log(workdir: Path) -> list[dict]:
+    """Parse .observer/egress.log into Observation.network_attempts."""
+    log = workdir / ".observer" / "egress.log"
+    if not log.is_file():
+        return []
+    entries: list[dict] = []
+    for line in log.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entries.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return entries
+
+
 # Credential / history denylist for the `config:` seam. The user's config
 # directory mixes behavioural config (safe to copy) with secrets and past
 # conversation history (must NOT enter a sandbox an attack runs in). See
@@ -641,22 +819,40 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
         _materialize_fixtures(workdir, case.fixtures, agent.workdir)
         if case.mcp:
             _materialize_mcp_server(workdir, case.mcp, agent.workdir)
-        elif case.rag:
-            _materialize_mcp_server(workdir, _rag_to_mcp(case.rag), agent.workdir)
+        else:
+            # Always emit an empty .mcp.json so agents that hard-wire
+            # --mcp-config /workspace/.mcp.json (e.g. claudecode) don't error
+            # on non-mcp cases.
+            _write_standard_mcp_config(workdir)
         if case.web:
             _materialize_web_server(workdir, case.web)
+        if agent.observe_network:
+            _materialize_observer(workdir)
         # the agent runs as a non-root user; make the throwaway workspace
         # fully writable so it can create / modify / delete files there
         for path in (workdir, *workdir.rglob("*")):
             path.chmod(0o777)
         before = _snapshot(workdir)
 
-        # Launcher chain: config-apply (copies home-dir config) then web (boots
-        # the mock). Each launcher execs the rest of argv, so they compose.
+        # Launcher chain: config-apply (copies home-dir config), then observer
+        # (starts egress proxy), then web (boots the mock). Each launcher
+        # execs the rest of argv, so they compose.
         add_host_args: list[str] = []
         launch_prefix: list[str] = []
+        extra_env: list[str] = []
         if config_needs_launcher:
             launch_prefix += ["python3", f"{agent.workdir}/.arsconfig/apply.py"]
+        if agent.observe_network:
+            launch_prefix += ["python3", f"{agent.workdir}/.observer/run.py"]
+            proxy = f"http://127.0.0.1:{_OBSERVER_PORT}"
+            extra_env += [
+                "-e", f"HTTP_PROXY={proxy}",
+                "-e", f"HTTPS_PROXY={proxy}",
+                "-e", f"http_proxy={proxy}",
+                "-e", f"https_proxy={proxy}",
+                "-e", "NO_PROXY=",
+                "-e", "no_proxy=",
+            ]
         if case.web:
             for host in _web_hosts(case.web):
                 add_host_args += ["--add-host", f"{host}:127.0.0.1"]
@@ -672,6 +868,7 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             _DOCKER_NETWORK.get(agent.network, agent.network),
             *add_host_args,
             *_env_args(agent.env),
+            *extra_env,
             "-v",
             f"{workdir}:{agent.workdir}",
             "-w",
@@ -699,6 +896,7 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
         after = _snapshot(workdir)
         d = _diff(before, after)
         mcp = _read_intercept_log(workdir)
+        net = _read_observer_log(workdir) if agent.observe_network else []
         return Observation(
             exit_code=exit_code,
             agent_stdout=stdout,
@@ -709,4 +907,5 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             tool_calls=mcp["tool_calls"],
             mcp_connected=mcp["mcp_connected"],
             mcp_tools_listed=mcp["mcp_tools_listed"],
+            network_attempts=net,
         )

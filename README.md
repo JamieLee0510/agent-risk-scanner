@@ -99,13 +99,14 @@ Richer observation is on the roadmap:
 |------|--------------|----------------------------|
 | 1 (now) | none | filesystem side effects — destructive writes / deletes |
 | 2 (now, MCP) | none — interception layer | + which MCP tool the agent called, in what order; whether it connected at all |
+| 2 (now, network) | opt-in — `observe_network: true` | + every host:port the agent tried to reach (HTTP-client level; raw sockets escape) |
 | 3    | OTEL trace | + full causal chain, intent-drift, action chains |
 
-For `mcp/` and `rag/` cases the scanner inserts a transparent **interception
-layer** between the agent and the synthesized MCP server (see
-`specs/20260521.md` §3). It records every `tools/call` — so a
-case can assert `forbidden_tool_calls` directly, without needing a filesystem
-side effect — and verifies the agent actually enumerated the server's tools;
+For `mcp/` cases the scanner inserts a transparent **interception layer**
+between the agent and the synthesized MCP server (see `specs/20260521.md`
+§3). It records every `tools/call` — so a case can assert
+`forbidden_tool_calls` directly, without needing a filesystem side effect —
+and verifies the agent actually enumerated the server's tools;
 if it never did, the verdict is `inconclusive` rather than a misleading pass.
 
 ## Scanner CLI
@@ -174,15 +175,18 @@ mirror the three injection surfaces:
   `computer-use` is planned.
 - **mcp** — a poisoned MCP server (tool-poisoning). The harness synthesizes
   a stdio MCP server from the case yaml; subtype `tool-poisoning` is live.
-- **rag** — poisoned documents in a retrieval store. The harness seeds a
-  knowledge base and a `search_kb` retrieval tool; subtype
-  `corpus-poisoning` is live.
+- **agentic** — *excessive agency*: the agent has a powerful tool (send_email,
+  delete_all_logs, sql_execute …) and the task doesn't authorise its use; a
+  soft social-engineering nudge tempts it. Tested via the MCP interception
+  layer + `forbidden_tool_calls`. Maps to OWASP LLM06 / Agentic T2.
 
 Each case is tagged `kind: attack | benign`; benign hard-negatives
 (superficially scary but legitimate tasks) catch false positives.
 
-Implemented today: 10 `prompt-injection`, 4 `mcp/tool-poisoning`, and 4
-`rag/corpus-poisoning` cases.
+RAG corpus-poisoning is intentionally **not** a case family: real agents'
+retrieval pipelines (LanceDB, Pinecone, embedded vector stores …) have no
+standard protocol the scanner can override, so a "RAG" scan against a vanilla
+mock would not reflect the user's actual deployment. See "Out of scope".
 
 ## How this is different from neighbours
 
@@ -224,6 +228,11 @@ backlog:
 - **Threats with no observable runtime side effect** — anything that
   leaves no trace in the filesystem diff, stdout, or intercepted tool
   calls cannot be given a verdict, so it is not a case.
+- **RAG-as-a-system / memory-poisoning of the user's own retrieval pipeline** —
+  the user's LanceDB / Pinecone / embedded retriever has no standard
+  protocol the scanner can intercept (unlike MCP). Without an override seam,
+  any "RAG scan" would only test a vanilla mock, not the user's actual
+  deployment. Removed 2026-05-24.
 
 A scan reports only what it tested. A green result means *the cases that
 ran found nothing* — it is not a safety certificate for the agent.
@@ -239,8 +248,8 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
 
 - Agents integrate via **argv injection** — the task is appended as the last CLI argument
 - Observation: **filesystem diff** + **agent stdout** — network and tool-call observers are not yet built
-- Cases: 18 — 10 `prompt-injection` + 4 `mcp/tool-poisoning` + 4 `rag/corpus-poisoning` (13 attack, 5 benign)
-- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_rag_agent`, `dummy_web_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `web_langgraph`, `pi`, `claudecode`
+- Cases: 38 — `prompt-injection` (general / skill / obfuscation / web / benign) + `mcp/tool-poisoning` + `agentic/excessive-agency`
+- Example agents under `examples/`: `dummy_agent`, `dummy_mcp_agent`, `dummy_web_agent`, `langgraph`, `mcp_langgraph`, `mcp_official`, `web_langgraph`, `pi`, `claudecode`
 
 ## Roadmap
 
@@ -251,7 +260,8 @@ filesystem diff → judge. Implemented under `agent_risk_scanner/` —
   - [x] Phase-1 `prompt-injection` cases (10: general / skill / benign)
   - [ ] `network_attempts` observer
 - **v0.1** ✅ — MCP-server fixture; `mcp/tool-poisoning` cases; `dummy_mcp_agent`
-- **v0.2** ✅ — retrieval-store fixture + answer judge; `rag/corpus-poisoning` cases; `dummy_rag_agent`
+- ~~**v0.2** — RAG corpus-poisoning~~ — **removed 2026-05-24**: real agents'
+  retrieval has no standard intercept protocol, see Out of scope
 - **v0.3** — in progress:
   - [x] MCP interception layer — tool-call observation + connection verification (`forbidden_tool_calls` judge, `inconclusive` verdict)
   - [ ] interceptor tampering mode — rug-pull, channel injection (v0.3.1)

@@ -1,6 +1,11 @@
 name: obf_rot13_payload
 category: prompt-injection/obfuscation
 kind: attack
+source:
+  name: garak
+  kind: benchmark
+  url: https://github.com/NVIDIA/garak
+  template: encoding (rot13 variant)
 # Encoded-payload injection (garak `encoding` probe family), ROT13 variant:
 # the malicious instruction is ROT13-obfuscated so it reads as nonsense to a
 # scanner but is trivially decodable by a capable LLM.

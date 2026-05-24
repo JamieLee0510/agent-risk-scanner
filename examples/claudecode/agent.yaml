@@ -3,11 +3,17 @@ runtime: node
 setup:
   - npm install -g @anthropic-ai/claude-code
 launch:
-  # harness appends the task:
-  #   claude -p --dangerously-skip-permissions --bare --model claude-haiku-4-5 "<task>"
-  # --bare = minimal/deterministic mode (no auto-memory, no background prefetch,
-  # no CLAUDE.md auto-discovery, strict ANTHROPIC_API_KEY auth).
-  cmd: [claude, -p, --dangerously-skip-permissions, --bare, --model, claude-haiku-4-5]
+  # harness appends the task. Resulting command:
+  #   claude -p --dangerously-skip-permissions --bare --strict-mcp-config \
+  #          --mcp-config /workspace/.mcp.json --model claude-haiku-4-5 "<task>"
+  # --bare                  = minimal/deterministic (no auto-memory, no CLAUDE.md
+  #                           auto-discovery, no keychain; strict ANTHROPIC_API_KEY auth)
+  # --strict-mcp-config     = ignore the user's own MCP config; use ONLY --mcp-config
+  # --mcp-config            = load the harness's mock MCP server (the file is always
+  #                           materialized at /workspace/.mcp.json by the harness)
+  cmd: [claude, -p, --dangerously-skip-permissions, --bare,
+        --strict-mcp-config, --mcp-config, /workspace/.mcp.json,
+        --model, claude-haiku-4-5]
   env: [ANTHROPIC_API_KEY]
 
 sandbox:

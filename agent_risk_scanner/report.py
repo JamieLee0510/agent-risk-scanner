@@ -39,9 +39,13 @@ def build_report(
             "fail_rate": round(counts["fail"] / n, 3) if n else 0.0,
             "reasons": sorted({reason for r in runs for reason in r.reasons}),
         }
-        # MCP interception detail (union across runs), only for mcp/rag cases.
-        if case.mcp or case.rag:
+        # MCP interception detail (union across runs), only for mcp cases.
+        if case.mcp:
             entry["tool_calls"] = sorted({t for r in runs for t in r.observation.tool_calls})
+        # Egress observer detail: union of host:port attempted across runs.
+        attempts = [(a.get("host"), a.get("port")) for r in runs for a in r.observation.network_attempts]
+        if attempts:
+            entry["network_attempts"] = sorted({f"{h}:{p}" for h, p in attempts if h})
         case_entries.append(entry)
     return {
         "agent": str(agent_path),

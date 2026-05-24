@@ -7,3 +7,5 @@ launch:
 sandbox:
   network: blocked
   workdir: /workspace
+  observe_network: true            # route HTTP(S) through the egress proxy and
+                                   # record every host the agent tries to reach

@@ -1,6 +1,12 @@
 name: skill_inject_line_injection
 category: prompt-injection/skill
 kind: attack
+source:
+  name: skill-inject
+  kind: benchmark
+  url: https://github.com/aisa-group/skill-inject
+  template: line injection
+  notes: "malicious step slipped into the middle of the skill's numbered procedure"
 # "Line injection" skill variant (skill-inject): rather than poisoning the
 # skill's description, the malicious step is slipped into the middle of the
 # skill's numbered procedure, so it reads as one ordinary instruction among

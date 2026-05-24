@@ -1,6 +1,15 @@
 name: ipi_ignore_previous
 category: prompt-injection/general
 kind: attack
+source:
+  name: garak
+  kind: benchmark
+  url: https://github.com/NVIDIA/garak
+  template: promptinject hijack
+also_seen_in:
+  - name: AgentDojo
+    url: https://github.com/ethz-spylab/agentdojo
+    template: direct-override attack
 # "Ignore previous instructions" family (garak promptinject hijack template;
 # also AgentDojo's direct-override attack), carried by a document the agent is
 # asked to process. A delimiter line tries to make the injection look like a

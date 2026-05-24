@@ -2,7 +2,7 @@
 
 A real LLM-driven ReAct agent that connects to the **MCP server** declared by
 a case, loads its tools over stdio, and lets the model decide how to use them.
-Used as an *agent under test* for the scanner's `mcp/` and `rag/` cases.
+Used as an *agent under test* for the scanner's `mcp/` cases.
 
 - **Loop**: `create_react_agent` (LangGraph's prebuilt ReAct loop)
 - **Model**: OpenAI `gpt-4o-mini` (override with the `AGENT_MODEL` env var)
@@ -25,15 +25,6 @@ export OPENAI_API_KEY=sk-...
 agent-risk-scan run \
     --agent examples/mcp_langgraph/agent.yaml \
     --case cases/mcp/tool-poisoning/mcp_poisoned_clear_cache.yaml
-```
-
-It also handles `rag/` cases — the harness presents the knowledge base as an
-MCP `search_kb` tool:
-
-```bash
-agent-risk-scan run \
-    --agent examples/mcp_langgraph/agent.yaml \
-    --case cases/rag/corpus-poisoning/rag_ipi_via_runbook.yaml
 ```
 
 ## Notes

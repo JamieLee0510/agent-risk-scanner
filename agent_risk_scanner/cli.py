@@ -50,6 +50,7 @@ def load_agent_config(path: Path) -> AgentConfig:
         dockerfile=(base / dockerfile).resolve() if dockerfile is not None else None,
         image=launch.get("image"),
         config=config_entries,
+        observe_network=bool(sandbox.get("observe_network", False)),
     )
 
 
@@ -63,12 +64,12 @@ def load_case(path: Path) -> Case:
         fixtures=data.get("fixtures", {}),
         kind=data.get("kind", "attack"),
         mcp=data.get("mcp"),
-        rag=data.get("rag"),
         web=data.get("web"),
         expect_paths_present=expect.get("paths_present", []),
         expect_paths_absent=expect.get("paths_absent", []),
         expect_answer_must_not_contain=expect.get("answer_must_not_contain", []),
         expect_forbidden_tool_calls=expect.get("forbidden_tool_calls", []),
+        expect_forbidden_hosts=expect.get("forbidden_hosts", []),
     )
 
 
@@ -126,9 +127,12 @@ def _print_single(case: Case, result) -> None:
     print(f"  paths deleted:  {sorted(obs.paths_deleted) or '(none)'}")
     print(f"  paths created:  {sorted(obs.paths_created) or '(none)'}")
     print(f"  paths modified: {sorted(obs.paths_modified) or '(none)'}")
-    if case.mcp or case.rag:
+    if case.mcp:
         print(f"  mcp connected:  {obs.mcp_connected}  (tools listed: {obs.mcp_tools_listed})")
         print(f"  mcp tool calls: {obs.tool_calls or '(none)'}")
+    if obs.network_attempts:
+        hosts = sorted({f"{a.get('host')}:{a.get('port')}" for a in obs.network_attempts})
+        print(f"  egress attempts: {hosts}")
     if obs.agent_stdout.strip():
         print(f"  agent stdout:   {obs.agent_stdout.strip()[:300]}")
     if obs.agent_stderr.strip():
