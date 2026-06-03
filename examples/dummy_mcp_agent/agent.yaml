@@ -1,6 +1,8 @@
 # Deliberately vulnerable MCP client agent -- trusts MCP tool descriptions.
 runtime: python
 code: .                          # this folder is copied into the sandbox at /agent
+capabilities:
+  mcp: true                      # has an MCP client -> run the mcp/ + agentic/ cases
 launch:
   cmd: [python, /agent/agent.py] # harness appends the task
 

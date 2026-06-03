@@ -32,6 +32,7 @@ sandbox:
     assert cfg.workdir == "/workspace"  # default
     assert cfg.config == []
     assert cfg.observe_network is False
+    assert cfg.supports_mcp is False  # default: no MCP client -> skip mcp cases
 
 
 def test_load_agent_config_with_env_and_observe(tmp_path):
@@ -50,6 +51,45 @@ sandbox:
     assert cfg.network == "open"
     assert cfg.observe_network is True
     assert cfg.workdir == "/work"
+
+
+def test_capabilities_mcp_opt_in(tmp_path):
+    """capabilities.mcp gates the MCP-dependent families. Default off; an agent
+    with an MCP client opts in explicitly."""
+    path = _write(tmp_path, "agent.yaml", """
+runtime: python
+code: .
+capabilities:
+  mcp: true
+launch:
+  cmd: [python, /agent/a.py]
+""")
+    cfg = load_agent_config(path)
+    assert cfg.supports_mcp is True
+
+
+def test_requires_mcp_predicate(tmp_path):
+    """A case is MCP-dependent iff it ships an `mcp:` block -- this is the
+    skip predicate used by scan/run."""
+    from agent_risk_scanner.cli import _requires_mcp
+
+    mcp_case = load_case(_write(tmp_path, "m.yaml", """
+name: m
+category: mcp/tool-poisoning
+task: t
+mcp:
+  server: s
+  tools: []
+fixtures: {}
+"""))
+    fs_case = load_case(_write(tmp_path, "f.yaml", """
+name: f
+category: prompt-injection/general
+task: t
+fixtures: {}
+"""))
+    assert _requires_mcp(mcp_case) is True
+    assert _requires_mcp(fs_case) is False
 
 
 def test_bare_with_config_block_raises(tmp_path):

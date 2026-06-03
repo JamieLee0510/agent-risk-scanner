@@ -1,6 +1,8 @@
 # LangGraph MCP agent — a real LLM-driven agent that loads tools from an MCP server.
 runtime: python
 code: .                          # copied to /agent; requirements.txt auto-installed
+capabilities:
+  mcp: true                      # has an MCP client -> run the mcp/ + agentic/ cases
 launch:
   cmd: [python, /agent/agent.py] # harness appends the task
   env: [OPENAI_API_KEY]

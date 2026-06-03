@@ -23,6 +23,11 @@ class AgentConfig:
     # Opt-in egress observer: route HTTP(S) through a logging proxy and record
     # every host:port the agent tries to reach. See specs/20260522.md §4.1.
     observe_network: bool = False
+    # Does the agent have an MCP client? Default False. When False the scanner
+    # skips every MCP-dependent case (anything with an `mcp:` block -- the
+    # mcp/ and agentic/ families) instead of emitting a wall of `inconclusive`
+    # verdicts: an agent that can't speak MCP was never exposed to the attack.
+    supports_mcp: bool = False
     # advanced escape hatches for agents that don't fit a generic runtime
     dockerfile: Path | None = None
     image: str | None = None

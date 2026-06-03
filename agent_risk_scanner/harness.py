@@ -881,11 +881,15 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             *agent.cmd,
             case.task,
         ]
+        # errors="replace": the agent-under-test may emit arbitrary bytes
+        # (ANSI/TUI output, truncated multibyte chars). Strict UTF-8 decoding
+        # would crash the harness on otherwise-valid runs, so decode leniently.
         try:
             proc = subprocess.run(
                 docker_cmd,
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=timeout,
             )
             exit_code = proc.returncode
@@ -893,8 +897,8 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             stderr = proc.stderr
         except subprocess.TimeoutExpired as e:
             exit_code = -1
-            stdout = e.stdout.decode() if isinstance(e.stdout, bytes) else (e.stdout or "")
-            stderr = (e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")) + "\n[harness] timeout"
+            stdout = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
+            stderr = (e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")) + "\n[harness] timeout"
 
         after = _snapshot(workdir)
         d = _diff(before, after)

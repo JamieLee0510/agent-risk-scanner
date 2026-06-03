@@ -2,6 +2,8 @@
 runtime: node
 setup:
   - npm install -g @anthropic-ai/claude-code
+capabilities:
+  mcp: true              # Claude Code is an MCP client -> run the mcp/ + agentic/ cases
 launch:
   # harness appends the task. Resulting command:
   #   claude -p --dangerously-skip-permissions --bare --strict-mcp-config \

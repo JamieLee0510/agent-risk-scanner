@@ -20,6 +20,7 @@ def load_agent_config(path: Path) -> AgentConfig:
 
     code = data.get("code")
     dockerfile = launch.get("dockerfile")
+    capabilities = data.get("capabilities", {})
 
     # config: copy the user's real behavioural config into the sandbox so the
     # scan tests their configured deployment, not a vanilla install.
@@ -51,6 +52,7 @@ def load_agent_config(path: Path) -> AgentConfig:
         image=launch.get("image"),
         config=config_entries,
         observe_network=bool(sandbox.get("observe_network", False)),
+        supports_mcp=bool(capabilities.get("mcp", False)),
     )
 
 
@@ -71,6 +73,13 @@ def load_case(path: Path) -> Case:
         expect_forbidden_tool_calls=expect.get("forbidden_tool_calls", []),
         expect_forbidden_hosts=expect.get("forbidden_hosts", []),
     )
+
+
+def _requires_mcp(case: Case) -> bool:
+    """A case needs an MCP client iff it ships a poisoned MCP server (`mcp:`).
+    That single field covers both the mcp/ and agentic/ families -- the latter
+    ride on the same interception layer."""
+    return case.mcp is not None
 
 
 def _verdict_color(verdict: str) -> str:
@@ -144,6 +153,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     case = load_case(args.case)
     n = max(1, args.repeat)
 
+    if _requires_mcp(case) and not agent.supports_mcp:
+        print(
+            f"[harness] skipping {case.name}: it needs an MCP client, but the "
+            "agent declares capabilities.mcp=false (no MCP client). Set "
+            "capabilities.mcp: true in agent.yaml to test MCP security."
+        )
+        return 0
+
     print(f"[harness] building image for {args.agent} (runtime: {agent.runtime})")
     tag = build_image(agent)
     print(f"[harness] image tag: {tag}")
@@ -184,13 +201,25 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print(f"[harness] building image for {args.agent} (runtime: {agent.runtime})")
     tag = build_image(agent)
     print(f"[harness] image tag: {tag}")
+    # Drop cases the agent structurally can't be exposed to, so the report
+    # isn't padded with `inconclusive`. Today that's the MCP-dependent cases
+    # (mcp/ + agentic/) when the agent has no MCP client.
+    cases, skipped = [], []
+    for path in case_paths:
+        c = load_case(path)
+        (skipped if (_requires_mcp(c) and not agent.supports_mcp) else cases).append(c)
+    if skipped:
+        print(
+            f"[harness] skipping {len(skipped)} MCP-dependent case(s) "
+            "(agent.capabilities.mcp=false): " + ", ".join(c.name for c in skipped)
+        )
+
     note = f" ({n} runs each)" if n > 1 else ""
-    print(f"[harness] running {len(case_paths)} cases from {args.cases}{note}")
+    print(f"[harness] running {len(cases)} cases from {args.cases}{note}")
     print()
 
     case_runs = []  # list[list[CaseResult]] -- N runs per case
-    for path in case_paths:
-        case = load_case(path)
+    for case in cases:
         runs = [
             judge(case, run_case(case, agent, tag, timeout=args.timeout), mount_root=agent.workdir)
             for _ in range(n)
