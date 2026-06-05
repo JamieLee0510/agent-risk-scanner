@@ -9,6 +9,7 @@ specs/
 
 # Generated scan reports.
 report*.json
+reports/
 
 # Python / tooling caches and build artifacts.
 *.egg-info/
