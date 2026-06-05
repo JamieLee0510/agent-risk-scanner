@@ -16,7 +16,14 @@ _DOCKER_NETWORK = {"blocked": "none", "open": "bridge"}
 _RUNTIME_BASE = {
     "python": "python:3.12-slim",
     "node": "node:22-slim",
+    "go": "golang:1.25-bookworm",
 }
+
+# Never copy these into the build context when materializing `code:` -- secrets
+# must not be baked into the image, and VCS/build-cache dirs only bloat it.
+_CODE_IGNORE = shutil.ignore_patterns(
+    ".git", ".env", "*.pem", "*.key", "__pycache__", "node_modules", ".venv",
+)
 
 
 def _env_args(env: list[str]) -> list[str]:
@@ -45,9 +52,9 @@ def _generate_dockerfile(agent: AgentConfig) -> str:
         )
     setup = list(agent.setup)
     lines = [f"FROM {_RUNTIME_BASE[agent.runtime]}"]
-    if agent.runtime == "node":
+    if agent.runtime in ("node", "go"):
         # The harness scaffolding (synthesized MCP/web mock servers and their
-        # launchers) is python3; node slim images don't ship it.
+        # launchers) is python3; the node/go base images don't ship it.
         lines.append(
             "RUN apt-get update && apt-get install -y --no-install-recommends "
             "python3 && rm -rf /var/lib/apt/lists/*"
@@ -60,6 +67,13 @@ def _generate_dockerfile(agent: AgentConfig) -> str:
                 setup = ["pip install --no-cache-dir -r /agent/requirements.txt"]
             elif (agent.code / "package.json").is_file():
                 setup = ["npm install --prefix /agent"]
+            elif (agent.code / "go.mod").is_file():
+                # Compile the module's main command into a binary on PATH. The
+                # conventional entrypoint is ./cmd/<name>; fall back to the
+                # module root. Overridable via an explicit `setup:` if the
+                # layout differs.
+                target = "./cmd/..." if (agent.code / "cmd").is_dir() else "."
+                setup = [f"cd /agent && go build -o /usr/local/bin/agent {target}"]
     lines += [f"RUN {step}" for step in setup]
     lines += [f"WORKDIR {agent.workdir}", "USER agent"]
     return "\n".join(lines) + "\n"
@@ -81,7 +95,7 @@ def build_image(agent: AgentConfig) -> str:
             # common path: synthesize the Dockerfile from the yaml
             tag_key = _generate_dockerfile(agent)
             if agent.code is not None:
-                shutil.copytree(agent.code, ctx_path / "agent")
+                shutil.copytree(agent.code, ctx_path / "agent", ignore=_CODE_IGNORE)
             dockerfile = ctx_path / "Dockerfile"
             dockerfile.write_text(tag_key)
             build_context = ctx_path

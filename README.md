@@ -272,6 +272,19 @@ Implemented under `agent_risk_scanner/` — `harness.py` (Docker harness),
   - [ ] replay AgentDojo / InjecAgent fixtures
 - **v1.0** — tier-3 OTEL trace consumer; richer judge (rule + LLM-arbitrated)
 
+## Testing
+
+```bash
+pip install -e ".[dev]"   # pytest + ruff
+pytest                    # run the test suite
+ruff check .              # lint
+```
+
+The judge / schema / report / harness tests run **without Docker**. Docker is
+only required to run an actual scan (`agent-risk-scan run|scan`), which launches
+the agent under test in an isolated container. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the full developer setup.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Security issues should be
