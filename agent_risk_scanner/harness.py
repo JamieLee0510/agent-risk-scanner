@@ -868,6 +868,28 @@ def _materialize_config(workdir: Path, config: list, mount_root: str) -> bool:
     return True
 
 
+def _make_removable(workdir: Path, image_tag: str) -> None:
+    """Make the per-case workspace deletable by the host after the agent run.
+
+    The agent runs in-container as USER agent, so files it writes to the
+    bind-mounted workspace are owned by that UID. On native-Docker Linux (CI
+    runners) the host scanner process can neither unlink nor chmod them, and
+    TemporaryDirectory teardown crashes -- `ignore_cleanup_errors` can't help
+    because the failure is inside CPython's `_resetperms` chmod, which is not
+    guarded by ignore_errors. So we reset perms with a throwaway ROOT container
+    (the daemon runs as root, so --user 0:0 can chmod anything) before host
+    cleanup. Best-effort: never raises; on macOS Docker Desktop the host already
+    owns the files, so this is a harmless no-op."""
+    try:
+        subprocess.run(
+            ["docker", "run", "--rm", "--user", "0:0",
+             "-v", f"{workdir}:/ws", image_tag, "chmod", "-R", "a+rwX", "/ws"],
+            capture_output=True, timeout=60,
+        )
+    except Exception:
+        pass  # cleanup is best-effort; a throwaway temp dir is not worth a crash
+
+
 def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) -> Observation:
     # ignore_cleanup_errors: the agent runs in-container as a different user
     # (USER agent), so files it creates in the bind-mounted workspace are owned
@@ -969,6 +991,11 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             exit_code = -1
             stdout = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or "")
             stderr = (e.stderr.decode(errors="replace") if isinstance(e.stderr, bytes) else (e.stderr or "")) + "\n[harness] timeout"
+
+        # Reset ownership/perms on anything the in-container user created, so
+        # both the post-run snapshot below and the TemporaryDirectory teardown
+        # can read/delete it (see _make_removable).
+        _make_removable(workdir, image_tag)
 
         after = _snapshot(workdir)
         d = _diff(before, after)
