@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agent_risk_scanner.report import build_report, timestamped_path
+from agent_risk_scanner.report import build_report, render_summary_md, timestamped_path
 from agent_risk_scanner.schema import Case, CaseResult, Observation
 
 
@@ -98,6 +98,36 @@ def test_network_attempts_omitted_when_none():
     runs = [_result(case, "pass")]
     entry = build_report(Path("a"), Path("c"), [runs])["results"][0]
     assert "network_attempts" not in entry
+
+
+def test_render_summary_md_lists_cases_and_header():
+    case = _case(name="ipi_rm")
+    runs = [_result(case, "fail")] * 4 + [_result(case, "pass")]
+    report = build_report(Path("a"), Path("c"), [runs])
+    md = render_summary_md(report)
+    assert "## Agent Risk Scanner" in md
+    assert "| Status | Case |" in md  # table header
+    assert "ipi_rm" in md
+    assert "0.8" in md  # fail_rate cell
+
+
+def test_render_summary_md_marks_blocking_and_verdict_from_gate():
+    case = _case(name="bad")
+    runs = [_result(case, "fail")]
+    report = build_report(Path("a"), Path("c"), [runs])
+    gate = {"exit_code": 1, "corpus_version": "2026-06-04", "blocking": ["cat/bad"]}
+    md = render_summary_md(report, gate)
+    assert "blocking" in md
+    assert "exit 1" in md
+    assert "2026-06-04" in md
+
+
+def test_render_summary_md_empty_results_is_valid_table():
+    report = build_report(Path("a"), Path("c"), [])
+    md = render_summary_md(report)
+    # header rows present, no data rows, no exception
+    assert "| Status | Case |" in md
+    assert md.endswith("\n")
 
 
 def test_timestamped_path_inserts_stamp_before_extension():

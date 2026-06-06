@@ -61,6 +61,74 @@ def build_report(
     }
 
 
+def _verdict_breakdown(counts: dict) -> str:
+    """'fail 4/5, pass 1/5' style cell from a verdict_counts dict."""
+    total = sum(counts.values())
+    parts = [f"{v} {counts[v]}/{total}" for v in ("fail", "pass", "inconclusive", "error") if counts.get(v)]
+    return ", ".join(parts) or "-"
+
+
+def render_summary_md(report: dict, gate_result: dict | None = None) -> str:
+    """Render a scan report as GitHub-flavoured markdown for $GITHUB_STEP_SUMMARY.
+
+    Pure function of the serializable report (plus an optional plain-dict view
+    of the gate decision) -- no I/O, no docker, no `policy` import, so it stays
+    trivially testable and the report/policy layers stay decoupled. The
+    optional `gate_result` carries the key lists (`blocking` / `waived` /
+    `improved` / `error_cases`) so each row can be labelled with its gate
+    status; without it, rows fall back to a fail-rate-only status.
+    """
+    g = gate_result or {}
+    blocking = set(g.get("blocking", []))
+    waived = set(g.get("waived", []))
+    improved = set(g.get("improved", []))
+    errored = set(g.get("error_cases", []))
+
+    def status_for(key: str, fail_rate: float, counts: dict) -> tuple[int, str]:
+        # returns (sort_rank, label); lower rank sorts first
+        if key in blocking:
+            return 0, "🔴 blocking"
+        if key in errored:
+            return 1, "⚠️ error"
+        if key in waived:
+            return 2, "➖ waived"
+        if key in improved:
+            return 3, "🟢 improved"
+        if fail_rate > 0:
+            return 1, "⚠️ fail"
+        return 4, "✅ pass"
+
+    rows = []
+    for e in report.get("results", []):
+        key = f"{e['category']}/{e['case']}"
+        counts = e.get("verdict_counts", {})
+        rank, label = status_for(key, float(e.get("fail_rate", 0.0)), counts)
+        rows.append((rank, e["case"], e["category"], e.get("kind", "attack"),
+                     e.get("fail_rate", 0.0), _verdict_breakdown(counts), label))
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    lines: list[str] = ["## Agent Risk Scanner"]
+    corpus = g.get("corpus_version") or report.get("corpus_version")
+    if corpus:
+        lines.append(f"corpus_version: `{corpus}`")
+    if "exit_code" in g:
+        verdict = {0: "✅ **PASS**", 1: "🔴 **FAIL — security findings block this change**",
+                   2: "⚠️ **ERROR — run did not complete cleanly**"}.get(g["exit_code"], "?")
+        lines.append(f"{verdict}  (exit {g['exit_code']})")
+    s = report.get("summary", {})
+    if s:
+        lines.append(
+            f"{s.get('cases', 0)} cases × {s.get('runs_per_case', 0)} run(s) — "
+            f"{s.get('cases_with_fail', 0)} with ≥1 fail"
+        )
+    lines.append("")
+    lines.append("| Status | Case | Category | Kind | Fail rate | Verdicts |")
+    lines.append("|---|---|---|---|---|---|")
+    for _, case, category, kind, fail_rate, breakdown, label in rows:
+        lines.append(f"| {label} | {case} | {category} | {kind} | {fail_rate} | {breakdown} |")
+    return "\n".join(lines) + "\n"
+
+
 def timestamped_path(path: Path) -> Path:
     """Insert the current date and time into a report filename, before the
     extension: `report.json` -> `report-20260521-143022.json`."""

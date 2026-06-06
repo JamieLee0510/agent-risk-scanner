@@ -1,0 +1,89 @@
+name: "Agent Risk Scanner"
+description: >-
+  Sandboxed security gate for tool-using AI agents. Runs your agent against an
+  adversarial corpus (prompt-injection / MCP tool-poisoning / excessive-agency)
+  in throwaway Docker containers and fails the job on a security regression.
+author: "Jamie Lee"
+
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  agent:
+    description: "Path to your agent.yaml, relative to the repo root."
+    required: true
+  policy:
+    description: "Path to your agent-risk.policy.yaml, relative to the repo root."
+    required: true
+  report:
+    description: "Optional path to also write the full JSON report (relative to repo root)."
+    required: false
+    default: ""
+  summary-md:
+    description: >-
+      Where to append the markdown findings table. The default sentinel
+      "step-summary" writes to the GitHub job summary so results show up on the
+      PR. Give a path to write elsewhere, or "" to disable.
+    required: false
+    default: "step-summary"
+  timeout:
+    description: "Per-agent-run timeout in seconds."
+    required: false
+    default: "60"
+  python-version:
+    description: "Python version used to run the scanner on the runner."
+    required: false
+    default: "3.12"
+
+# Composite (not a Docker action) on purpose: the scanner shells out to the
+# runner's own `docker` to build and run the agent-under-test, bind-mounting a
+# per-case workspace from the runner filesystem. Running the scanner itself
+# inside a container would break those bind mounts (Docker-in-Docker path
+# mismatch), so it must run directly on the runner host.
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install agent-risk-scanner
+      shell: bash
+      # Install from THIS action's own checkout ($GITHUB_ACTION_PATH), so the
+      # action tag pins both the scanner code and the attack corpus -- no PyPI
+      # release required.
+      run: pip install "$GITHUB_ACTION_PATH"
+
+    - name: Run agent-risk gate
+      shell: bash
+      env:
+        # User paths resolve against the caller's checkout ($GITHUB_WORKSPACE);
+        # the corpus resolves against this action's checkout.
+        ARS_AGENT: ${{ inputs.agent }}
+        ARS_POLICY: ${{ inputs.policy }}
+        ARS_REPORT: ${{ inputs.report }}
+        ARS_SUMMARY: ${{ inputs.summary-md }}
+        ARS_TIMEOUT: ${{ inputs.timeout }}
+      run: |
+        set -euo pipefail
+        args=(
+          --agent      "$GITHUB_WORKSPACE/$ARS_AGENT"
+          --policy     "$GITHUB_WORKSPACE/$ARS_POLICY"
+          --cases-root "$GITHUB_ACTION_PATH/cases"
+          --timeout    "$ARS_TIMEOUT"
+        )
+        if [ -n "$ARS_REPORT" ]; then
+          args+=(--report "$GITHUB_WORKSPACE/$ARS_REPORT")
+        fi
+        # "step-summary" sentinel -> the real $GITHUB_STEP_SUMMARY path; any
+        # other non-empty value is used verbatim; "" disables.
+        if [ "$ARS_SUMMARY" = "step-summary" ]; then
+          args+=(--summary-md "$GITHUB_STEP_SUMMARY")
+        elif [ -n "$ARS_SUMMARY" ]; then
+          args+=(--summary-md "$ARS_SUMMARY")
+        fi
+        # The gate's exit code (0 pass / 1 security fail / 2 infra error) is the
+        # step's exit code, so a non-zero result fails the job and blocks the PR.
+        agent-risk-scan gate "${args[@]}"

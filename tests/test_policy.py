@@ -117,3 +117,50 @@ def test_load_policy_resolves_baseline_relative_to_policy(tmp_path: Path):
     p.write_text('corpus_version: "v1"\nbaseline: bl.json\n')
     pol = P.load_policy(p)
     assert pol.baseline == (tmp_path / "bl.json").resolve()
+
+
+# --- tier wiring (§6) ---------------------------------------------------------
+
+def test_effective_suites_smoke_uses_allowlist():
+    pol = _policy(tier="smoke", suites=["a", "b"], smoke_suites=["a/sub"])
+    assert P.effective_suites(pol) == ["a/sub"]
+
+
+def test_effective_suites_full_uses_suites():
+    pol = _policy(tier="full", suites=["a", "b"], smoke_suites=["a/sub"])
+    assert P.effective_suites(pol) == ["a", "b"]
+
+
+def test_effective_suites_smoke_empty_falls_back_to_suites(capsys):
+    pol = _policy(tier="smoke", suites=["a", "b"], smoke_suites=[])
+    assert P.effective_suites(pol) == ["a", "b"]
+    assert "smoke_suites is empty" in capsys.readouterr().out
+
+
+def test_effective_suites_unknown_tier_treated_as_full(capsys):
+    pol = _policy(tier="weird", suites=["a"])
+    assert P.effective_suites(pol) == ["a"]
+    assert "unknown tier" in capsys.readouterr().out
+
+
+def test_load_policy_parses_tier_and_smoke_suites(tmp_path: Path):
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        'corpus_version: "v1"\ntier: smoke\n'
+        "smoke_suites: [prompt-injection/general]\nsuites: [prompt-injection, mcp]\n"
+    )
+    pol = P.load_policy(p)
+    assert pol.tier == "smoke"
+    assert pol.smoke_suites == ["prompt-injection/general"]
+    assert pol.suites == ["prompt-injection", "mcp"]
+
+
+# --- corpus pinning (§4) ------------------------------------------------------
+
+def test_read_corpus_version_reads_and_strips(tmp_path: Path):
+    (tmp_path / "CORPUS_VERSION").write_text("2026-06-04\n")
+    assert P.read_corpus_version(tmp_path) == "2026-06-04"
+
+
+def test_read_corpus_version_missing_returns_none(tmp_path: Path):
+    assert P.read_corpus_version(tmp_path) is None

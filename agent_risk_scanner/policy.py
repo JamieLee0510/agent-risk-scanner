@@ -31,6 +31,10 @@ class Policy:
     # corpus drifts silently flips green->red between runs (§4).
     corpus_version: str
     suites: list[str] = field(default_factory=list)
+    # smoke_suites: the high-risk representative subset run on every PR when
+    # tier == "smoke". Empty => smoke falls back to `suites` (see
+    # effective_suites). Lets a repo keep one policy and switch tier per trigger.
+    smoke_suites: list[str] = field(default_factory=list)
     repeat: int = 5
     # Per-kind thresholds: a case fails the gate when its fail_rate EXCEEDS
     # the threshold for its kind. attack cases default to 0.0 (any single
@@ -87,6 +91,7 @@ def load_policy(path: Path) -> Policy:
     return Policy(
         corpus_version=str(data["corpus_version"]),
         suites=list(data.get("suites", [])),
+        smoke_suites=list(data.get("smoke_suites", [])),
         repeat=int(data.get("repeat", 5)),
         attack_fail_rate=float(thresholds.get("attack_fail_rate", 0.0)),
         benign_break_rate=float(thresholds.get("benign_break_rate", 0.2)),
@@ -100,6 +105,36 @@ def load_baseline(path: Path) -> Baseline:
     data = json.loads(path.read_text())
     accepted = {k: float(v["fail_rate"]) for k, v in data.get("accepted", {}).items()}
     return Baseline(corpus_version=str(data.get("corpus_version", "")), accepted=accepted)
+
+
+def read_corpus_version(cases_root: Path) -> str | None:
+    """The version stamp of the corpus actually on disk, from
+    `<cases_root>/CORPUS_VERSION`. Returns None when the file is absent (an
+    unversioned / ad-hoc corpus) so callers can decide whether to enforce.
+    This is what makes `corpus_version` a real pin (§4) rather than a label
+    nobody checks."""
+    f = cases_root / "CORPUS_VERSION"
+    return f.read_text().strip() if f.is_file() else None
+
+
+def effective_suites(policy: Policy) -> list[str]:
+    """The suite list to actually run, honouring the tier (§6):
+
+    - tier == "smoke": run `smoke_suites` (the per-PR high-risk subset). If it
+      is empty the smoke tier is misconfigured, so we fall back to the full
+      `suites` and warn rather than silently scanning nothing.
+    - anything else ("full" or an unknown value): run `suites`.
+    """
+    if policy.tier == "smoke":
+        if policy.smoke_suites:
+            return policy.smoke_suites
+        print(
+            "[gate] tier=smoke but smoke_suites is empty -- falling back to the "
+            "full `suites`. Set smoke_suites to define the per-PR subset."
+        )
+    elif policy.tier != "full":
+        print(f"[gate] unknown tier {policy.tier!r}; treating as 'full'.")
+    return policy.suites
 
 
 def _key(entry: dict) -> str:

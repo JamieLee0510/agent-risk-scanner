@@ -10,7 +10,7 @@ import yaml
 from . import policy as policy_mod
 from .harness import build_image, run_case
 from .judge import judge
-from .report import build_report, timestamped_path, write_report
+from .report import build_report, render_summary_md, timestamped_path, write_report
 from .schema import AgentConfig, Case
 
 # cases/ ships in the repo root, a sibling of the agent_risk_scanner package.
@@ -289,17 +289,21 @@ def _scan_for_policy(
     """Build the image and run every case in the policy's suites, returning a
     report dict. Shared by `gate` and `baseline` so they measure identically."""
     agent = load_agent_config(agent_path)
-    case_paths = _resolve_suites(cases_root, policy.suites)
+    suites = policy_mod.effective_suites(policy)
+    case_paths = _resolve_suites(cases_root, suites)
     if not case_paths:
-        raise FileNotFoundError(f"no cases found for suites {policy.suites} under {cases_root}")
+        raise FileNotFoundError(f"no cases found for suites {suites} under {cases_root}")
     n = max(1, policy.repeat)
     print(f"[harness] building image for {agent_path} (runtime: {agent.runtime})")
     tag = build_image(agent)
     print(f"[harness] image tag: {tag}")
     print(f"[harness] corpus_version: {policy.corpus_version}")
     cases = _filter_exposable(case_paths, agent)
-    suites_note = ", ".join(policy.suites) if policy.suites else "all"
-    print(f"[harness] running {len(cases)} cases [{suites_note}] x {n} run(s) each")
+    suites_note = ", ".join(suites) if suites else "all"
+    print(
+        f"[harness] running {len(cases)} cases [tier={policy.tier}: {suites_note}] "
+        f"x {n} run(s) each"
+    )
     print()
     case_runs = _run_cases(cases, agent, tag, n, timeout)
     return build_report(agent_path, cases_root, case_runs)
@@ -311,6 +315,20 @@ def cmd_gate(args: argparse.Namespace) -> int:
     0 = pass, 1 = security failure (block PR), 2 = infra error. This is the
     one command CI keys off (see specs/20260604.md §1)."""
     policy = policy_mod.load_policy(args.policy)
+
+    # Reproducibility guard (§4): the corpus actually on disk must match the
+    # version the policy pinned, else the gate's verdict isn't reproducible. A
+    # mismatch is an infra/config failure (exit 2), not "the agent is unsafe".
+    actual_corpus = policy_mod.read_corpus_version(args.cases_root)
+    if actual_corpus is not None and actual_corpus != policy.corpus_version:
+        print(
+            f"[gate] ERROR: corpus on disk is {actual_corpus!r} but policy pins "
+            f"corpus_version {policy.corpus_version!r} -- refusing to run against a "
+            "mismatched corpus (a gate whose corpus drifts isn't reproducible). "
+            "Align the policy's corpus_version with the installed corpus."
+        )
+        return policy_mod.EXIT_INFRA_ERROR
+
     baseline = None
     if policy.baseline:
         baseline = policy_mod.load_baseline(policy.baseline)
@@ -329,6 +347,22 @@ def cmd_gate(args: argparse.Namespace) -> int:
 
     result = policy_mod.evaluate(report, policy, baseline)
     _print_gate_result(result, has_baseline=baseline is not None)
+
+    if args.summary_md:
+        gate_dict = {
+            "exit_code": result.exit_code,
+            "corpus_version": result.corpus_version,
+            "blocking": [f.key for f in result.blocking],
+            "waived": [f.key for f in result.waived],
+            "improved": [f.key for f in result.improved],
+            "error_cases": result.error_cases,
+        }
+        # append (don't truncate): $GITHUB_STEP_SUMMARY may already hold output
+        # from earlier steps, and clobbering it would drop their summaries.
+        with open(args.summary_md, "a") as fh:
+            fh.write(render_summary_md(report, gate_dict))
+        print(f"[gate] step summary written to {args.summary_md}")
+
     return result.exit_code
 
 
@@ -437,6 +471,11 @@ def main(argv: list[str] | None = None) -> int:
     gate_p.add_argument(
         "--report", type=Path, default=None,
         help="optional: also write the full JSON report here",
+    )
+    gate_p.add_argument(
+        "--summary-md", type=Path, default=None, dest="summary_md",
+        help="optional: append a markdown findings table here (point at "
+        "$GITHUB_STEP_SUMMARY in CI to surface results on the PR)",
     )
     gate_p.add_argument("--timeout", type=int, default=60)
 

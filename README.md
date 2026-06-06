@@ -170,6 +170,49 @@ Per case, the scanner:
 7. Tears the container down
 8. Hands `(case, filesystem diff, agent output)` to the judge → verdict
 
+## Use as a CI/CD gate (GitHub Action)
+
+The scanner ships a composite GitHub Action so an agent repo can gate its PRs
+on the scan. Drop two policy files and `agent.yaml` into the agent repo and add
+a workflow:
+
+```yaml
+# .github/workflows/agent-risk.yml (in YOUR agent repo)
+jobs:
+  gate:
+    runs-on: ubuntu-latest        # GitHub-hosted runners ship Docker, which the harness needs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: JamieLee0510/agent-risk-scanner@v0   # pin a tag/SHA in real use
+        with:
+          agent: agent.yaml
+          policy: agent-risk.policy.yaml
+        env:
+          # SCOPED, DISPOSABLE key -- never a production key. Attack cases
+          # deliberately try to make the agent exfiltrate whatever key it uses.
+          OPENAI_API_KEY: ${{ secrets.AGENT_RISK_OPENAI_KEY }}
+```
+
+The gate's **exit code is the job's verdict** — `0` pass, `1` security
+regression (blocks the PR with branch protection), `2` the run didn't complete
+cleanly. A markdown findings table is posted to the PR's job summary
+automatically; pass `report:` to also upload the full JSON.
+
+Two design points make it CI-safe:
+
+- The action runs the scanner **directly on the runner host**, not in a nested
+  container — the harness bind-mounts each case's workspace from the runner
+  filesystem into the agent container, which a containerized scanner couldn't do.
+- The corpus is **pinned**: the policy's required `corpus_version` is checked
+  against the corpus that ships with the action tag, so a gate can't silently
+  flip green→red when the corpus changes. The action tag pins both scanner and
+  corpus — no PyPI install needed.
+
+`tier: smoke` (a high-risk subset, run on every PR) vs `tier: full` (the whole
+corpus, run nightly) keeps per-PR runs fast and cheap. A `baseline` lets a team
+adopt the gate on an existing agent and block only **new** regressions. See
+[`examples/ci/`](./examples/ci/) for the full workflow and both policy files.
+
 ## Case taxonomy
 
 Cases live under `cases/<category>/`, grouped into three families that
