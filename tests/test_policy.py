@@ -157,6 +157,19 @@ def test_load_policy_parses_tier_and_smoke_suites(tmp_path: Path):
 
 # --- corpus pinning (§4) ------------------------------------------------------
 
+def test_load_policy_tolerates_null_yaml_keys(tmp_path: Path):
+    # `suites:` / `smoke_suites:` / `thresholds:` with no value parse to None,
+    # which used to crash load_policy (`list(None)`). They must collapse to the
+    # empty default -- empty suites means "whole corpus".
+    p = tmp_path / "policy.yaml"
+    p.write_text('corpus_version: "v1"\nsuites:\nsmoke_suites:\nthresholds:\n')
+    pol = P.load_policy(p)
+    assert pol.suites == []
+    assert pol.smoke_suites == []
+    assert pol.attack_fail_rate == 0.0  # threshold default still applied
+    assert P.effective_suites(pol) == []  # -> _resolve_suites runs the whole corpus
+
+
 def test_read_corpus_version_reads_and_strips(tmp_path: Path):
     (tmp_path / "CORPUS_VERSION").write_text("2026-06-04\n")
     assert P.read_corpus_version(tmp_path) == "2026-06-04"

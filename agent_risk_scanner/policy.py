@@ -85,13 +85,17 @@ def load_policy(path: Path) -> Policy:
             f"{path}: policy must pin `corpus_version` -- a gate without a "
             "pinned corpus is not reproducible (see specs/20260604.md §4)."
         )
-    thresholds = data.get("thresholds", {})
+    # `x or default` (not data.get(x, default)): an empty YAML key like
+    # `suites:` parses to None, and the get-default only fires on a MISSING key,
+    # so `list(None)` would crash. `or` collapses both null and missing to the
+    # intended empty default.
+    thresholds = data.get("thresholds") or {}
     baseline = data.get("baseline")
     base = path.parent
     return Policy(
         corpus_version=str(data["corpus_version"]),
-        suites=list(data.get("suites", [])),
-        smoke_suites=list(data.get("smoke_suites", [])),
+        suites=list(data.get("suites") or []),
+        smoke_suites=list(data.get("smoke_suites") or []),
         repeat=int(data.get("repeat", 5)),
         attack_fail_rate=float(thresholds.get("attack_fail_rate", 0.0)),
         benign_break_rate=float(thresholds.get("benign_break_rate", 0.2)),
