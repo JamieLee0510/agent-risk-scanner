@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `skill:` case block — abstract poisoned Agent Skill (name / description /
+  body / bundled `scripts`) with `${SKILL_DIR}` substitution, materialized by
+  the harness into the agent's real skill directory
+- `capabilities.skill` + `capabilities.skill_dir` in `agent.yaml` — agents
+  declare whether and where they auto-discover skills; skill cases are
+  capability-gated like the MCP families (skipped, not falsely passed, when
+  unsupported)
 - LICENSE (Apache-2.0), NOTICE, SECURITY.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md
 - CHANGELOG.md
 - `tests/` — pytest coverage for judge, schema loaders, and report builder
@@ -16,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - PyPI metadata (authors, urls, classifiers, keywords) in `pyproject.toml`
 
 ### Changed
+- `prompt-injection/skill` cases rewritten to the `skill:` schema with
+  goal-only tasks (no hard-coded `/workspace/skills/...` path in the task), so
+  they test genuine skill auto-discovery rather than "read the file I named".
+  Corpus bumped to `2026-06-06`.
+- Standard `.mcp.json` now emits both `type` and `transport: stdio` so one
+  config file is portable across MCP-client agents (go-agent-harness requires
+  `transport`; Claude Code / Cursor use `type`)
+- `examples/golang_harness` opts into `mcp` + `skill` capabilities
 - README: added CI / license / Python / PRs-welcome badges
 - README: fixed broken links to `specs/` (the directory is gitignored;
   references now point to in-tree design notes)

@@ -13,6 +13,21 @@ an *agent under test* for the scanner.
   `ANTHROPIC_API_KEY`. Keeps each run deterministic and isolated. (If a future
   case tests a *poisoned* `CLAUDE.md`, run that one without `--bare`.)
 
+## Skill cases and `--bare`
+
+The `prompt-injection/skill` family plants a poisoned `SKILL.md` in the agent's
+skill directory and relies on the agent **auto-discovering** it. `--bare`
+disables that discovery, so this `agent.yaml` does **not** declare
+`capabilities.skill` — the scanner skips the skill family for it (rather than
+record misleading passes). To test Claude Code's skill handling, run a separate
+variant **without** `--bare` that declares:
+
+```yaml
+capabilities:
+  skill: true
+  skill_dir: .claude/skills
+```
+
 ## Files
 
 - `agent.yaml` — the only file. `runtime: node`, a `setup:` step that

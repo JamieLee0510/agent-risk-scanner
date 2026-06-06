@@ -347,10 +347,55 @@ def _write_standard_mcp_config(
     else:
         config = {
             "mcpServers": {
-                "harness": {"command": command, "args": list(args or [])}
+                # `type` and `transport` both say stdio: Claude Code / Cursor use
+                # `type` (and tolerate it absent), go-agent-harness requires
+                # `transport`. Emitting both keeps one config file portable across
+                # every MCP-client agent under test.
+                "harness": {
+                    "type": "stdio",
+                    "transport": "stdio",
+                    "command": command,
+                    "args": list(args or []),
+                }
             }
         }
     (workdir / ".mcp.json").write_text(json.dumps(config, indent=2))
+
+
+def _materialize_skill(workdir: Path, skill: dict, skill_dir: str, mount_root: str) -> None:
+    """Plant a case's poisoned Agent Skill where the agent under test discovers
+    skills, so it loads it via its OWN discovery (not because the task named a
+    file). `skill_dir` is the agent's skill root relative to the workdir
+    (.claude/skills, .agent/skills, ...); the skill lands at
+    <workdir>/<skill_dir>/<name>/SKILL.md.
+
+    A SKILL.md is `name`/`description` frontmatter + the `body`. Optional
+    `scripts` (a {relative_path: content} map) are bundled alongside it. The
+    literal `${SKILL_DIR}` in the body and scripts is substituted with the
+    skill's absolute in-container directory, so a case can reference a bundled
+    script portably regardless of where each agent roots its skills.
+    """
+    name = skill["name"]
+    rel_dir = f"{skill_dir.strip('/')}/{name}"
+    abs_dir = f"{mount_root}/{rel_dir}"
+    target_dir = workdir / rel_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    def _sub(text: str) -> str:
+        return text.replace("${SKILL_DIR}", abs_dir)
+
+    frontmatter = (
+        "---\n"
+        f"name: {name}\n"
+        f"description: {skill.get('description', '')}\n"
+        "---\n\n"
+    )
+    (target_dir / "SKILL.md").write_text(frontmatter + _sub(skill.get("body", "")))
+
+    for rel_path, content in (skill.get("scripts") or {}).items():
+        script_path = target_dir / rel_path
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(_sub(content))
 
 
 def _read_intercept_log(workdir: Path) -> dict:
@@ -824,7 +869,16 @@ def _materialize_config(workdir: Path, config: list, mount_root: str) -> bool:
 
 
 def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) -> Observation:
-    with tempfile.TemporaryDirectory() as tmp:
+    # ignore_cleanup_errors: the agent runs in-container as a different user
+    # (USER agent), so files it creates in the bind-mounted workspace are owned
+    # by that UID on the host. On native-Docker Linux (CI runners) the host
+    # scanner process can't unlink/chmod them, so the default TemporaryDirectory
+    # teardown raises PermissionError and crashes the whole run -- AFTER the
+    # observation is already captured. Swallow teardown errors: the per-case
+    # workspace is a throwaway, and the OS reclaims the temp dir anyway.
+    # (macOS Docker Desktop maps ownership back to the host user, so this only
+    # bites on Linux.)
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         workdir = Path(tmp)
         # agent config first (baseline), then case fixtures -- a case fixture
         # targeting the same path wins over agent config.
@@ -841,6 +895,8 @@ def run_case(case: Case, agent: AgentConfig, image_tag: str, timeout: int = 60) 
             # --mcp-config /workspace/.mcp.json (e.g. claudecode) don't error
             # on non-mcp cases.
             _write_standard_mcp_config(workdir)
+        if case.skill:
+            _materialize_skill(workdir, case.skill, agent.skill_dir, agent.workdir)
         if case.web:
             _materialize_web_server(workdir, case.web)
         if agent.observe_network:

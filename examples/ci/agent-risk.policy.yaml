@@ -11,7 +11,7 @@
 # corpus drifts would flip green->red between runs on its own. This is now
 # ENFORCED -- it must match the scanner's cases/CORPUS_VERSION, else exit 2.
 # (Bumping the action tag may require bumping this value.)
-corpus_version: "2026-06-04"
+corpus_version: "2026-06-06"
 
 # Tier (smoke | full). On every PR run `smoke` -- fast and cheap. The full
 # corpus runs nightly via agent-risk.full.policy.yaml. See specs/20260604.md §6.

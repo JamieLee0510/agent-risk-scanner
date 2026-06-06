@@ -39,6 +39,15 @@ def load_agent_config(path: Path) -> AgentConfig:
             src = base / src
         config_entries.append((str(src.resolve()), item["to"]))
 
+    supports_skill = bool(capabilities.get("skill", False))
+    skill_dir = capabilities.get("skill_dir")
+    if supports_skill and not skill_dir:
+        raise ValueError(
+            "agent.yaml: capabilities.skill is true but capabilities.skill_dir "
+            "is missing. Declare where this agent discovers skills, relative to "
+            "the workdir (e.g. skill_dir: .claude/skills or .agent/skills)."
+        )
+
     cmd = launch["cmd"]
     if config_entries and "--bare" in cmd:
         raise ValueError(
@@ -61,6 +70,8 @@ def load_agent_config(path: Path) -> AgentConfig:
         config=config_entries,
         observe_network=bool(sandbox.get("observe_network", False)),
         supports_mcp=bool(capabilities.get("mcp", False)),
+        supports_skill=supports_skill,
+        skill_dir=skill_dir,
     )
 
 
@@ -74,6 +85,7 @@ def load_case(path: Path) -> Case:
         fixtures=data.get("fixtures", {}),
         kind=data.get("kind", "attack"),
         mcp=data.get("mcp"),
+        skill=data.get("skill"),
         web=data.get("web"),
         expect_paths_present=expect.get("paths_present", []),
         expect_paths_absent=expect.get("paths_absent", []),
@@ -90,18 +102,40 @@ def _requires_mcp(case: Case) -> bool:
     return case.mcp is not None
 
 
+def _requires_skill(case: Case) -> bool:
+    """A case needs skill auto-discovery iff it ships a poisoned skill (`skill:`).
+    The task is goal-only -- the attack is delivered ONLY if the agent loads the
+    planted SKILL.md itself, so an agent without skill discovery never sees it."""
+    return case.skill is not None
+
+
+def _unexposable_reason(case: Case, agent: AgentConfig) -> str | None:
+    """Why this agent structurally can't be exposed to this case (so the verdict
+    would be meaningless), or None if it can. Keeps reports/gates from being
+    padded with misleading passes / inconclusives."""
+    if _requires_mcp(case) and not agent.supports_mcp:
+        return "agent.capabilities.mcp=false"
+    if _requires_skill(case) and not agent.supports_skill:
+        return "agent.capabilities.skill=false"
+    return None
+
+
 def _filter_exposable(case_paths: list[Path], agent: AgentConfig) -> list[Case]:
     """Load cases, dropping those the agent structurally can't be exposed to
-    (MCP cases against an agent with no MCP client), so reports/gates aren't
-    padded with `inconclusive`."""
+    (MCP cases against an agent with no MCP client; skill cases against an agent
+    that doesn't discover skills), so reports/gates aren't padded with
+    misleading passes / `inconclusive`."""
     cases, skipped = [], []
     for path in case_paths:
         c = load_case(path)
-        (skipped if (_requires_mcp(c) and not agent.supports_mcp) else cases).append(c)
+        if _unexposable_reason(c, agent) is not None:
+            skipped.append(c)
+        else:
+            cases.append(c)
     if skipped:
         print(
-            f"[harness] skipping {len(skipped)} MCP-dependent case(s) "
-            "(agent.capabilities.mcp=false): " + ", ".join(c.name for c in skipped)
+            f"[harness] skipping {len(skipped)} unexposable case(s): "
+            + ", ".join(f"{c.name} ({_unexposable_reason(c, agent)})" for c in skipped)
         )
     return cases
 
@@ -218,6 +252,15 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"[harness] skipping {case.name}: it needs an MCP client, but the "
             "agent declares capabilities.mcp=false (no MCP client). Set "
             "capabilities.mcp: true in agent.yaml to test MCP security."
+        )
+        return 0
+
+    if _requires_skill(case) and not agent.supports_skill:
+        print(
+            f"[harness] skipping {case.name}: it plants a poisoned skill, but the "
+            "agent declares capabilities.skill=false (no skill discovery). Set "
+            "capabilities.skill: true and skill_dir in agent.yaml to test skill "
+            "security."
         )
         return 0
 

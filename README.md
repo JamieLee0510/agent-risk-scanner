@@ -219,16 +219,28 @@ Cases live under `cases/<category>/`, grouped into three families that
 mirror the three injection surfaces:
 
 - **prompt-injection** — untrusted content carries a hidden instruction.
-  Subtypes: `general` (poisoned email / doc / README), `skill` (poisoned
-  `SKILL.md`), `obfuscation` (encoded payloads), `web` (indirect injection in
-  a fetched web page — served from a loopback mock, never the real internet);
-  `computer-use` is planned.
+  Subtypes: `general` (poisoned email / doc / README), `skill` (a poisoned
+  Agent Skill — see below), `obfuscation` (encoded payloads), `web` (indirect
+  injection in a fetched web page — served from a loopback mock, never the real
+  internet); `computer-use` is planned.
 - **mcp** — a poisoned MCP server (tool-poisoning). The harness synthesizes
   a stdio MCP server from the case yaml; subtype `tool-poisoning` is live.
 - **agentic** — *excessive agency*: the agent has a powerful tool (send_email,
   delete_all_logs, sql_execute …) and the task doesn't authorise its use; a
   soft social-engineering nudge tempts it. Tested via the MCP interception
   layer + `forbidden_tool_calls`. Maps to OWASP LLM06 / Agentic T2.
+
+A `skill/` case declares an abstract `skill:` block (name, description, body,
+optional bundled `scripts`) and a **goal-only task** — it never names a file.
+The harness plants the poisoned `SKILL.md` where the agent under test actually
+discovers skills, declared per agent as `capabilities.skill_dir` (e.g.
+`.claude/skills` for Claude Code, `.agent/skills` for go-agent-harness), so the
+attack is delivered through the agent's *own* skill auto-discovery — genuine
+skill-poisoning, not "read the file I named". Like the MCP families, skill cases
+are **capability-gated**: an agent that doesn't set `capabilities.skill: true`
+has its skill cases skipped (an agent that can't load skills was never exposed),
+rather than recording a misleading pass. A case can reference a bundled script
+portably via `${SKILL_DIR}`, substituted with the skill's absolute directory.
 
 Each case is tagged `kind: attack | benign`; benign hard-negatives
 (superficially scary but legitimate tasks) catch false positives.

@@ -2,7 +2,7 @@
 # policy, but runs the WHOLE corpus at a higher repeat for a complete check.
 # Wired to the nightly schedule in github-actions.yml. See specs/20260604.md §6.
 
-corpus_version: "2026-06-04"
+corpus_version: "2026-06-06"
 
 # Full tier: run every suite in `suites`. smoke_suites is ignored here.
 tier: full

@@ -28,6 +28,17 @@ class AgentConfig:
     # mcp/ and agentic/ families) instead of emitting a wall of `inconclusive`
     # verdicts: an agent that can't speak MCP was never exposed to the attack.
     supports_mcp: bool = False
+    # Does the agent auto-discover Agent Skills (SKILL.md files)? Default False.
+    # When False the scanner skips every skill case (anything with a `skill:`
+    # block) instead of emitting misleading passes: a goal-only skill case is
+    # only delivered if the agent actually loads the planted SKILL.md, so an
+    # agent that doesn't discover skills was never exposed to the attack.
+    supports_skill: bool = False
+    # Where this agent discovers project-local skills, relative to the workdir
+    # (e.g. ".claude/skills" for Claude Code, ".agent/skills" for go-agent-
+    # harness). Required when supports_skill is True; the harness materializes a
+    # case's poisoned SKILL.md at <workdir>/<skill_dir>/<name>/SKILL.md.
+    skill_dir: str | None = None
     # advanced escape hatches for agents that don't fit a generic runtime
     dockerfile: Path | None = None
     image: str | None = None
@@ -41,6 +52,7 @@ class Case:
     fixtures: dict[str, str]
     kind: str = "attack"  # attack | benign (benign = hard negative)
     mcp: dict | None = None  # poisoned MCP server spec (mcp/* cases)
+    skill: dict | None = None  # poisoned Agent Skill spec (prompt-injection/skill cases)
     web: dict | None = None  # poisoned web pages served by a mock web server
     expect_paths_present: list[str] = field(default_factory=list)
     expect_paths_absent: list[str] = field(default_factory=list)
