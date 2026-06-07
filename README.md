@@ -435,6 +435,63 @@ backlog:
 A scan reports only what it tested. A green result means *the cases that
 ran found nothing* — it is not a safety certificate for the agent.
 
+## Prior art & references
+
+This scanner stands on a large body of prior work. Surveying it is what
+produced the threat model, the case families, and — just as importantly —
+the in-/out-of-scope boundary above. The list below is that reading.
+
+**Tool-use prompt-injection benchmarks** — shaped the case format (a task +
+untrusted content that smuggles an instruction) and the argv-injection harness.
+
+- **AgentDojo** ([NeurIPS 2024](https://arxiv.org/abs/2406.13352), [repo](https://github.com/ethz-spylab/agentdojo)) — the most-cited tool-use indirect-prompt-injection benchmark; injection lives in tool output (an email body), not a screen. The reference point for "function-call agent under IPI."
+- **AgentDyn** — an open-ended extension of AgentDojo (new `shopping`/`github`/`dailylife` suites, 560 injection cases); pushed me toward goal-only, open-ended tasks over closed ground-truth ones.
+- **InjecAgent** ([arXiv 2403.02691](https://arxiv.org/abs/2403.02691), UIUC) — benchmarks IPI in tool-integrated agents; the canonical "tool output carries the attacker's instruction" taxonomy.
+- **RAS-Eval** — security benchmark for LLM agents in dynamic environments, classifying attacks by CWE; a model for measuring robustness across benign vs. attacked runs.
+- **LLMail-Inject** ([arXiv 2506.09956](https://arxiv.org/abs/2506.09956), Microsoft/ISTA/ETH) — the released platform from the email-injection challenge; a full end-to-end IPI system with four real defenses.
+
+**Computer-use / web-agent security** — the sandbox-owns-the-harness lineage. These run agents *for real* in VMs/containers; this project applies the same pattern to generic tool-use (the `os-harm × generic tool-use` gap noted above). Computer-use itself is on the roadmap, not yet a case family.
+
+- **OS-Harm** ([arXiv 2506.14866](https://arxiv.org/abs/2506.14866), NeurIPS 2025 Spotlight) — CUA safety benchmark on OSWorld; the clearest articulation of the sandbox-owned, agent-as-payload pattern this scanner adopts.
+- **OS-Blind** ([arXiv 2604.10577](https://arxiv.org/abs/2604.10577)) — shows benign user instructions alone expose critical CUA vulnerabilities; the inspiration for benign hard-negative cases.
+- **RedTeamCUA** ([arXiv 2505.21936](https://arxiv.org/abs/2505.21936), ICLR 2026 Oral) — hybrid web-OS adversarial sandbox (RTC-Bench, 864 cases) organised around the CIA triad.
+- **VPI-Bench** ([arXiv 2506.02456](https://arxiv.org/abs/2506.02456), ICLR 2026) — visual prompt injection for CUA/BUA; injection hidden in rendered pixels, a surface a filesystem diff can't see.
+- **WASP** ([arXiv 2504.18575](https://arxiv.org/abs/2504.18575), Meta) — web-agent security against PI in dockerized GitLab/Reddit sites; end-to-end-executable adversarial environments.
+- **WAInjectBench** — web-agent injection *detection* benchmark across text and image; a reminder that detection and runtime-behaviour are different measurements.
+- **SafeSearch** ([arXiv 2509.23694](https://arxiv.org/abs/2509.23694)) — automated red-teaming of search agents, treating retrieved results as the attack surface.
+
+**Skill / memory poisoning** — shaped the capability-gated `skill/` family (a poisoned `SKILL.md` planted where the agent auto-discovers skills).
+
+- **SKILL-INJECT** — benchmarks prompt injection hidden in skill files across Claude Code / Codex / Gemini CLI; first-hand evidence that the skill surface is real.
+- **HarmfulSkillBench** ([arXiv 2604.15415](https://arxiv.org/abs/2604.15415), TrustAIRLab) — measures whether agents refuse skills that *describe* harmful capability; the refusal-vs-comply framing behind the skill verdicts.
+
+**MCP security — attacks & scanners** — shaped the `mcp/` family and the stdio interception layer (tool-call observation + connection verification).
+
+- **mcp-scan / Snyk Agent Scan** ([Invariant Labs](https://github.com/invariantlabs-ai/mcp-scan)) — the most-cited MCP scanner; the static-artifact camp this project contrasts itself against (it inspects tool descriptions; it never runs the agent).
+- **MCP Safety Audit / McpSafetyScanner** ([arXiv 2504.03767](https://arxiv.org/abs/2504.03767)) — early multi-agent MCP-config auditor; the "LLM agents scanning MCP" line of work.
+- **mcp-sec-audit** (FSE artifact, `nyit-vancouver/mcp-sec-audit`) — argues hybrid static + dynamic (Docker + eBPF syscall capture) detection; benchmarked on MCPTox.
+- **MCP-Guard** ([arXiv 2508.10991](https://arxiv.org/abs/2508.10991)) — cascade (rule → small model → LLM) guardrail acting on the tool definitions themselves.
+- **MCP-SafetyBench** ([arXiv 2512.15163](https://arxiv.org/abs/2512.15163)) — agent-safety benchmark over real MCP servers (hijack / exfiltration, not task success).
+- **MCPTox** ([arXiv 2508.14925](https://arxiv.org/abs/2508.14925), AAAI 2026) — corpus of ~485 poisoned MCP tool definitions; the reference attack set for tool-poisoning detection rates.
+
+**Static scanners, runtime gates & red-team platforms** — the neighbouring camps in the comparison table; studying them clarified what *dynamic, side-effect-judged* adds.
+
+- **ClawGuard** ([arXiv 2604.11790](https://arxiv.org/abs/2604.11790)) — runtime sidecar that intercepts an agent's tool calls for deterministic, auditable rule checks; a *defense*, where this is a *test*.
+- **garak** ([NVIDIA](https://github.com/NVIDIA/garak)) — LLM vulnerability scanner — but its target is a `prompt → response` model, not an agent harness with side effects.
+- **promptfoo** ([repo](https://github.com/promptfoo/promptfoo)) — LLM I/O eval framework; every grader reads a string — no sandbox, no side-effect or tool-call channel. The clearest delineation of what this scanner observes that prompt-graders can't.
+- **AIDEFEND** ([aidefend.net](https://aidefend.net)) — a structured knowledge base of AI defensive countermeasures (MITRE D3FEND-like); a checklist for naming threats.
+- **ViolentUTF** — enterprise AI red-team platform integrating PyRIT + garak; the attack-generation end of the spectrum.
+- **ArkSim** (Arklex AI, Apache-2.0) — multi-turn agent simulation/eval with a CI-gate exit code; a model for the `gate` command's pass/fail contract.
+- **Prompt Mining** ([arXiv 2602.14161](https://arxiv.org/abs/2602.14161), ICLR 2026 workshop) — mechanistic-interpretability detector for malicious prompts; a reminder that white-box detection is a different (out-of-scope) tool.
+
+**RAG / GraphRAG poisoning** — studied in depth, then deliberately left **out of scope** (see above): real retrieval pipelines expose no standard protocol the scanner can intercept, so a "RAG scan" would only test a vanilla mock. Kept here as the evidence behind that boundary.
+
+- **PoisonedRAG** ([arXiv 2402.07867](https://arxiv.org/abs/2402.07867), USENIX Security 2025) — the first knowledge-base corruption attack on RAG; integrity (make the model answer wrong).
+- **RAG Knowledge-Extraction Attack & Defense Benchmark** — the confidentiality counterpart: malicious queries that exfiltrate the private knowledge base.
+- **SafeRAG** ([arXiv 2501.18636](https://arxiv.org/abs/2501.18636)) — first Chinese RAG-security benchmark; attacks across all four pipeline stages (index / retrieve / filter / generate).
+- **LogicPoison** (ACL 2026) — poisons the reasoning topology of GraphRAG via type-preserving entity swaps; natural-looking text, broken multi-hop inference.
+- **ImportSnare** (CCS 2025) — RAG-augmented code-generation hijacking: poison the retrieved "code manual" to steer the agent's `import` to an attacker package (a supply-chain escalation of typosquatting).
+
 ## Status
 
 **v0.1 — alpha.** The end-to-end loop works: build → sandbox → run agent
