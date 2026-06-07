@@ -58,6 +58,12 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["agent_risk_scanner*"]
 
+[tool.setuptools.package-data]
+# Vendored single-file dashboard that `agent-risk-scan report --html` bakes a
+# report into. Built from report-viewer/ (npm run build) -- regenerate with that
+# command after changing the viewer, then re-copy dist/index.html over this file.
+agent_risk_scanner = ["report_template.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"

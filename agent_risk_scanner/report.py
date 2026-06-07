@@ -139,3 +139,30 @@ def timestamped_path(path: Path) -> Path:
 def write_report(report: dict, output: Path) -> None:
     """Write the report dict to `output` as indented JSON."""
     output.write_text(json.dumps(report, indent=2) + "\n")
+
+
+# The vendored single-file dashboard (built from report-viewer/, see
+# pyproject's package-data) carries this quoted placeholder; render_html_report
+# swaps it for the report JSON so `window.__REPORT__` becomes the live data.
+HTML_TEMPLATE = Path(__file__).resolve().parent / "report_template.html"
+_REPORT_PLACEHOLDER = '"__ARS_REPORT_PLACEHOLDER__"'
+
+
+def render_html_report(report: dict) -> str:
+    """Bake `report` into the self-contained dashboard, returning one HTML string
+    that renders offline (no server, no companion JSON). Mirrors garak's
+    report_digest.build_html: read the built template, string-replace a marker
+    with the JSON payload."""
+    template = HTML_TEMPLATE.read_text()
+    if _REPORT_PLACEHOLDER not in template:
+        raise RuntimeError(
+            f"report template {HTML_TEMPLATE} is missing the "
+            f"{_REPORT_PLACEHOLDER} marker -- rebuild report-viewer "
+            "(npm run build) and re-copy dist/index.html over it."
+        )
+    # Escape `</` so a report string containing "</script>" can't break out of
+    # the inline <script>; `<\/` is an equivalent escape inside a JS string.
+    payload = json.dumps(report).replace("</", "<\\/")
+    # replace(count=1): exactly one full-literal marker exists (the guard's
+    # equality check uses a split literal that doesn't match this token).
+    return template.replace(_REPORT_PLACEHOLDER, payload, 1)

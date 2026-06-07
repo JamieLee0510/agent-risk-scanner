@@ -10,7 +10,13 @@ import yaml
 from . import policy as policy_mod
 from .harness import build_image, run_case
 from .judge import judge
-from .report import build_report, render_summary_md, timestamped_path, write_report
+from .report import (
+    build_report,
+    render_html_report,
+    render_summary_md,
+    timestamped_path,
+    write_report,
+)
 from .schema import AgentConfig, Case
 
 # cases/ ships in the repo root, a sibling of the agent_risk_scanner package.
@@ -464,6 +470,17 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_report(args: argparse.Namespace) -> int:
+    """Bake a report.json (from `scan`/`gate`) into a self-contained HTML
+    dashboard -- one file that renders offline (no server). The same artifact
+    serves the local flow (open the file) and CI (deploy it, link it)."""
+    report = json.loads(args.report_json.read_text())
+    out = args.out or args.report_json.with_suffix(".html")
+    out.write_text(render_html_report(report))
+    print(f"[report] wrote {out}  (open it directly -- no server needed)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-risk-scan")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -522,6 +539,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     gate_p.add_argument("--timeout", type=int, default=60)
 
+    report_p = sub.add_parser(
+        "report",
+        help="render a report.json into a self-contained HTML dashboard "
+        "(one offline file; same artifact for local viewing and CI links)",
+    )
+    report_p.add_argument(
+        "report_json", type=Path, help="path to a report.json from scan/gate"
+    )
+    report_p.add_argument(
+        "-o", "--out", type=Path, default=None,
+        help="output HTML path (default: the report's name with a .html suffix)",
+    )
+
     base_p = sub.add_parser(
         "baseline",
         help="accept the agent's current findings as a baseline so the gate "
@@ -548,6 +578,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_scan(args)
     if args.cmd == "gate":
         return cmd_gate(args)
+    if args.cmd == "report":
+        return cmd_report(args)
     if args.cmd == "baseline":
         return cmd_baseline(args)
     return 0

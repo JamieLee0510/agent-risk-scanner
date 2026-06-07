@@ -4,6 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Risk Scanner — Report</title>
+    <!--
+      Self-contained-export hook. `agent-risk-scan report --html` string-replaces
+      the quoted placeholder below with the report JSON, so `window.__REPORT__`
+      becomes the live data and the dashboard renders offline from one file.
+
+      CLASSIC (non-module) script in <head> on purpose: it runs during parsing,
+      before the deferred module bundle's loadInitialReport() reads the global.
+      The split-literal guard means an UN-baked build (dev, or a build the CLI
+      never touched) leaves the placeholder unreplaced, the equality holds, and
+      we DON'T set window.__REPORT__ -- so load.ts falls through to ?report= /
+      file-drop instead of erroring on a bogus embedded payload.
+    -->
+    <script>
+      (function () {
+        var data = "__ARS_REPORT_PLACEHOLDER__";
+        if (data !== "__ARS_REPORT_" + "PLACEHOLDER__") window.__REPORT__ = data;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -3,9 +3,15 @@ into a single entry with a fail-rate. Wrong aggregation = wrong KPI."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from agent_risk_scanner.report import build_report, render_summary_md, timestamped_path
+from agent_risk_scanner.report import (
+    build_report,
+    render_html_report,
+    render_summary_md,
+    timestamped_path,
+)
 from agent_risk_scanner.schema import Case, CaseResult, Observation
 
 
@@ -136,3 +142,44 @@ def test_timestamped_path_inserts_stamp_before_extension():
     assert p.suffix == ".json"
     # YYYYMMDD-HHMMSS = 15 chars + leading hyphen
     assert len(p.stem) == len("report") + 1 + 15
+
+
+def _extract_embedded_report(html: str) -> dict:
+    """Pull the JSON the template baked into `var data = {...};` back out, so a
+    test can assert on the live payload the dashboard will read."""
+    marker = "var data = "
+    start = html.index(marker) + len(marker)
+    # The injected payload is a JSON object literal terminated by `;` -- match
+    # braces to find its end (string fields may contain `;`/`}`, but never an
+    # unescaped brace).
+    depth, i = 0, start
+    for i in range(start, len(html)):
+        ch = html[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                break
+    return json.loads(html[start : i + 1].replace("<\\/", "</"))
+
+
+def test_render_html_report_bakes_report_and_drops_placeholder():
+    report = build_report(Path("a"), Path("c"), [[_result(_case(name="bad"), "fail")]])
+    html = render_html_report(report)
+    # the un-baked marker must be gone, and the live data recoverable + faithful
+    assert "__ARS_REPORT_PLACEHOLDER__" not in html
+    assert _extract_embedded_report(html) == report
+
+
+def test_render_html_report_escapes_script_close_to_prevent_breakout():
+    # A report string containing "</script>" must not terminate the inline
+    # <script> early -- it has to be escaped to <\/script>.
+    case = _case(name="x")
+    runs = [_result(case, "fail", reasons=["pwn </script><img src=x>"])]
+    report = build_report(Path("a"), Path("c"), [runs])
+    html = render_html_report(report)
+    assert "</script><img" not in html
+    assert "<\\/script>" in html
+    # ...and it still round-trips to the original value
+    assert _extract_embedded_report(html) == report
