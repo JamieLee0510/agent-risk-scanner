@@ -26,6 +26,23 @@ it adversarial inputs (poisoned files, indirect injections, destructive
 task framings), observes the side effects (filesystem diff today; network
 and tool-call observation planned), and renders a verdict per case.
 
+## Install
+
+The scanner runs your agent in a throwaway Docker container, so you need a
+running **Docker daemon** and **Python 3.11+**. The attack corpus lives in this
+repo (it does not yet ship as a pip package), so **clone** it — that gives you
+both the CLI and the `cases/` you scan against:
+
+```bash
+git clone https://github.com/JamieLee0510/agent-risk-scanner
+cd agent-risk-scanner
+pip install -e .            # puts `agent-risk-scan` on your PATH (add ".[dev]" for tests)
+agent-risk-scan --help
+```
+
+CI doesn't need any of this — the [GitHub Action](#use-as-a-cicd-gate-github-action)
+installs the scanner and pins the corpus from its own tag.
+
 ## Why launch the agent (vs. connect to a running one)
 
 Earlier iterations of this project assumed the user starts the agent and
@@ -51,7 +68,7 @@ runtime, point at their agent code, and say how to launch it:
 
 ```yaml
 # agent.yaml
-runtime: python                  # python | node — selects the sandbox base image
+runtime: python                  # python | node | go — selects the sandbox base image
 code: .                          # this folder is copied into the sandbox at /agent
                                   # (deps auto-install from requirements.txt / package.json)
 launch:
@@ -89,6 +106,75 @@ A few things to know:
 
 `examples/` has working configs for several real agents — Claude Code, a
 from-scratch LangGraph agent, Pi, and a deliberately-vulnerable dummy agent.
+
+## Quickstart — scan your own agent
+
+From a cloned + installed scanner (see [Install](#install)), five steps take
+your agent from zero to a rendered report. Your agent lives in its own repo;
+you just point the scanner at its `agent.yaml`.
+
+**1 — describe your agent in one `agent.yaml`.** The minimal contract: pick a
+runtime, point at your code, give the launch command. Your agent must accept
+**the case task as its final command-line argument** and act on files under
+`workdir`.
+
+```yaml
+# in YOUR agent repo
+runtime: python                    # python | node | go
+code: .                            # this dir is copied into the sandbox; deps auto-installed
+launch:
+  cmd: [python, /agent/agent.py]   # the scanner appends the case task as the last argv
+  env: [OPENAI_API_KEY]            # env var NAMES forwarded from your shell into the sandbox
+sandbox:
+  network: open                    # blocked (--network none) | open
+  workdir: /workspace              # a fresh per-case workspace is mounted here
+```
+
+Set `capabilities.mcp: true` / `capabilities.skill: true` (with `skill_dir`)
+**only** if your agent is an MCP client or auto-discovers skills — those gate the
+`mcp/`, `agentic/`, and `skill/` families (an agent that can't be exposed to a
+case has it skipped, not scored as a misleading pass). `setup:`, `config:`, and
+the `launch.dockerfile` / `launch.image` escape hatches are described in
+[How the user integrates their agent](#how-the-user-integrates-their-agent);
+[`examples/`](./examples/) has runnable configs to copy from.
+
+**2 — export a scoped, disposable API key.** The scanner forwards the names in
+`env:` from your shell into every container. **Never a production key** — attack
+cases deliberately try to make the agent exfiltrate whatever key it is given.
+
+```bash
+export OPENAI_API_KEY=sk-…         # a throwaway, ideally spend-limited key
+```
+
+**3 — smoke-test a single case** (one container build, seconds):
+
+```bash
+agent-risk-scan run \
+    --agent /path/to/your/agent.yaml \
+    --case cases/prompt-injection/general/ipi_rm_workspace.yaml
+```
+
+**4 — scan a family and write a JSON report.** `--repeat N` reports a hit-rate
+rather than a single verdict, because LLM agents are non-deterministic:
+
+```bash
+agent-risk-scan scan \
+    --agent /path/to/your/agent.yaml \
+    --cases cases/prompt-injection \
+    --repeat 3 \
+    --output reports/report.json   # timestamped -> reports/report-YYYYmmdd-HHMMSS.json
+```
+
+**5 — render the report into a self-contained HTML dashboard and open it:**
+
+```bash
+agent-risk-scan report reports/report-*.json --out reports/report.html
+open reports/report.html           # one offline file — no server, no build step
+```
+
+That's the whole local loop. To run the same scan as a **PR gate** and surface a
+clickable report link on every CI run, see
+[Use as a CI/CD gate](#use-as-a-cicd-gate-github-action).
 
 ## What the scanner observes
 
@@ -129,11 +215,24 @@ agent-risk-scan scan \
     --agent examples/langgraph/agent.yaml \
     --cases cases/prompt-injection \
     --repeat 5
+
+# turn a JSON report into a self-contained HTML dashboard
+agent-risk-scan report report-20260607-143022.json --out report.html
 ```
 
 `run` prints the verdict for a single case; `scan` runs every case under a
 directory and writes a timestamped JSON report. `--timeout` (seconds, default
 60) bounds each agent run.
+
+`report` bakes a `scan`/`gate` JSON report into **one self-contained HTML file**
+(the dashboard's JS/CSS and your data are inlined — open it directly, no server,
+works offline). The same artifact serves local viewing and CI links. `gate` —
+the policy-driven CI command whose exit code is a pass/fail verdict — is covered
+in [Use as a CI/CD gate](#use-as-a-cicd-gate-github-action).
+
+> Prefer the live dashboard while iterating? [`report-viewer/`](./report-viewer/)
+> is the same UI as a dev server (`npm install && npm run dev`); drag a
+> `report.json` onto it or load `?report=<url>`.
 
 `--repeat N` runs each case N times and reports a **hit-rate** rather than a
 single verdict. LLM agents are non-deterministic — the same case can pass on
@@ -212,6 +311,44 @@ Two design points make it CI-safe:
 corpus, run nightly) keeps per-PR runs fast and cheap. A `baseline` lets a team
 adopt the gate on an existing agent and block only **new** regressions. See
 [`examples/ci/`](./examples/ci/) for the full workflow and both policy files.
+
+### Publish a rendered report (clickable link)
+
+The job summary's markdown table is enough for most gates. For a richer, shareable
+view, render the same self-contained HTML dashboard and publish it to **GitHub
+Pages**, then drop the link on the run. Add three steps after the scan — pass
+`report: agent-risk-report.json` to the action so the JSON exists first:
+
+```yaml
+      # `agent-risk-scan` is already on PATH (the action pip-installed it), and
+      # the gate writes the JSON before deciding pass/fail -- so `if: always()`
+      # publishes a report even when the gate fails, which is when you want it.
+      - name: Render HTML report
+        if: always()
+        run: |
+          mkdir -p site
+          agent-risk-scan report agent-risk-report.json --out site/index.html
+
+      - name: Publish to GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v4   # needs `permissions: contents: write`
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          destination_dir: runs/${{ github.run_id }}   # a permanent URL per run
+          keep_files: true
+
+      - name: Link report in job summary
+        if: always()
+        run: |
+          url="https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/runs/${{ github.run_id }}/"
+          echo "## 🔗 Risk report: [$url]($url)" >> "$GITHUB_STEP_SUMMARY"
+```
+
+Three things to know: the **first run creates the `gh-pages` branch** — afterwards
+set *Settings → Pages → Source* to it once; a public repo's Pages is **public**, so
+keep the repo private if the results are sensitive; and **fork PRs can't deploy**
+(their `GITHUB_TOKEN` is read-only), so previews only work for same-repo branches.
 
 ## Case taxonomy
 
