@@ -104,7 +104,7 @@ A few things to know:
 - For agents that don't fit a generic runtime, `launch.dockerfile` or
   `launch.image` are optional escape hatches.
 
-`examples/` has working configs for several real agents — Claude Code, a
+`examples/` has working configs for several real agents — Claude Code, Codex, a
 from-scratch LangGraph agent, Pi, and a deliberately-vulnerable dummy agent.
 
 ## Quickstart — scan your own agent

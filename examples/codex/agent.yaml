@@ -1,0 +1,62 @@
+# OpenAI Codex CLI (@openai/codex) — installed straight from npm.
+runtime: node
+setup:
+  # Codex is a native (Rust) binary and reads the OS CA bundle for TLS to the
+  # OpenAI API; node:22-slim ships without it (npm works only because Node
+  # bundles its own CAs). Install ca-certificates or every request fails with
+  # "no native root CA certificates found". setup runs as root at build time.
+  - apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+  - npm install -g @openai/codex
+capabilities:
+  mcp: true # Codex is an MCP client -> run the mcp/ + agentic/ cases
+launch:
+  # harness appends the task. Resulting command:
+  #   codex exec --dangerously-bypass-approvals-and-sandbox --ignore-user-config \
+  #              -m gpt-4o-mini \
+  #              -c mcp_servers.harness.command="python3" \
+  #              -c mcp_servers.harness.args=["/workspace/.mcp/interceptor.py"] \
+  #              "<task>"
+  #
+  # --dangerously-bypass-approvals-and-sandbox
+  #     = run tools autonomously with no approval prompts and no Codex-side
+  #       sandbox. Required for non-interactive `codex exec`: with the default
+  #       policy, MCP tool calls are auto-cancelled because stdin is closed
+  #       (openai/codex#24135). Safe here because the scanner already runs the
+  #       agent inside an isolated, network-controlled, throwaway container.
+  # --ignore-user-config
+  #     = minimal/deterministic: skip $CODEX_HOME/config.toml discovery so the
+  #       scan reflects a clean install, not whatever config happens to be on
+  #       the box (Codex's analogue of Claude Code's --bare).
+  # -m gpt-5-nano
+  #     = cheapest Codex-native model, for reproducible low-cost runs
+  #       (override with -m).
+  # -c mcp_servers.harness.*
+  #     = Codex has no `--mcp-config <file>` flag; MCP servers come from config.
+  #       The harness always materializes the (poisoned) mock server's stdio
+  #       interceptor at /workspace/.mcp/interceptor.py on mcp/ cases, so we
+  #       point a `harness` MCP server at it via -c overrides (values parse as
+  #       TOML). On non-mcp cases the interceptor is absent; Codex logs that the
+  #       server failed to start and proceeds, so the same launch line is reused
+  #       for every case.
+  cmd:
+    [
+      codex,
+      exec,
+      --dangerously-bypass-approvals-and-sandbox,
+      --ignore-user-config,
+      -m,
+      gpt-5-nano,
+      -c,
+      'mcp_servers.harness.command="python3"',
+      -c,
+      'mcp_servers.harness.args=["/workspace/.mcp/interceptor.py"]',
+    ]
+  # Codex authenticates with its OWN env var, CODEX_API_KEY -- the built-in
+  # `openai` provider does NOT read OPENAI_API_KEY (and the provider can't be
+  # overridden). The value is still a normal OpenAI API key, so:
+  #   export CODEX_API_KEY=$OPENAI_API_KEY
+  env: [CODEX_API_KEY]
+
+sandbox:
+  network: open # the agent calls the OpenAI API from inside the container
+  workdir: /workspace
