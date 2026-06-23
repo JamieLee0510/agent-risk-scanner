@@ -33,7 +33,7 @@ export function DropZone({
       ref={inputRef}
       type="file"
       accept="application/json,.json"
-      style={{ display: "none" }}
+      className="hidden"
       onChange={(e) => handle(e.target.files?.[0])}
     />
   );
@@ -42,8 +42,8 @@ export function DropZone({
     return (
       <>
         {picker}
-        <button className="btn ghost" onClick={() => inputRef.current?.click()}>
-          <Upload size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
+        <button className="btn btn-ghost" onClick={() => inputRef.current?.click()}>
+          <Upload size={14} className="mr-1.5 -mb-0.5 inline" />
           Load report
         </button>
       </>
@@ -52,7 +52,9 @@ export function DropZone({
 
   return (
     <div
-      className={`dropzone ${drag ? "drag" : ""}`}
+      className={`rounded-xl border-[1.5px] border-dashed p-10 text-center text-dim transition-all ${
+        drag ? "border-accent bg-accent/[0.06]" : "border-line-strong"
+      }`}
       onDragOver={(e) => {
         e.preventDefault();
         setDrag(true);
@@ -65,15 +67,15 @@ export function DropZone({
       }}
     >
       {picker}
-      <Upload size={28} style={{ marginBottom: 10, opacity: 0.7 }} />
-      <div style={{ fontSize: 15, color: "var(--text)", marginBottom: 4 }}>
-        Drop an agent-risk-scanner report
+      <Upload size={28} className="mx-auto mb-2.5 opacity-70" />
+      <div className="mb-1 text-[15px] text-text">Drop an agent-risk-scanner report</div>
+      <div className="mb-4">
+        a <span className="font-mono">*.json</span> from your scan
       </div>
-      <div style={{ marginBottom: 16 }}>a <span className="mono">*.json</span> from your scan</div>
       <button className="btn" onClick={() => inputRef.current?.click()}>
         Choose file
       </button>
-      {err && <div className="err" style={{ marginTop: 14 }}>{err}</div>}
+      {err && <div className="mt-3.5 text-[12.5px] text-critical">{err}</div>}
     </div>
   );
 }

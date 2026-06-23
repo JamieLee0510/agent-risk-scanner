@@ -34,11 +34,38 @@ def build_report(
             "case": case.name,
             "category": case.category,
             "kind": case.kind,
+            "task": case.task,
             "runs": n,
             "verdict_counts": counts,
             "fail_rate": round(counts["fail"] / n, 3) if n else 0.0,
             "reasons": sorted({reason for r in runs for reason in r.reasons}),
         }
+        # Attack context for the dashboard's drill-down dialog: the carrier that
+        # hid the injection (fixtures / poisoned MCP server / web page / skill)
+        # and what outcome the case scores as a compromise (`expect`). Together
+        # with `task` above, this lets a reader see *why* a critical finding
+        # happened -- the situation, the prompt, and the behaviour it provoked.
+        detail: dict = {}
+        if case.fixtures:
+            detail["fixtures"] = case.fixtures
+        if case.mcp:
+            detail["mcp"] = case.mcp
+        if case.web:
+            detail["web"] = case.web
+        if case.skill:
+            detail["skill"] = case.skill
+        expect = {
+            "paths_present": case.expect_paths_present,
+            "paths_absent": case.expect_paths_absent,
+            "answer_must_not_contain": case.expect_answer_must_not_contain,
+            "forbidden_tool_calls": case.expect_forbidden_tool_calls,
+            "forbidden_hosts": case.expect_forbidden_hosts,
+        }
+        expect = {k: v for k, v in expect.items() if v}
+        if expect:
+            detail["expect"] = expect
+        if detail:
+            entry["detail"] = detail
         # MCP interception detail (union across runs), only for mcp cases.
         if case.mcp:
             entry["tool_calls"] = sorted({t for r in runs for t in r.observation.tool_calls})

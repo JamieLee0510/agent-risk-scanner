@@ -8,6 +8,10 @@ import { CategoryChart } from "./components/CategoryChart";
 import { CaseList } from "./components/CaseList";
 import { DropZone } from "./components/DropZone";
 
+// Page shell — centered, max-width column. Reused by every render branch.
+const SHELL = "mx-auto max-w-[1180px] px-6 pt-7 pb-20";
+const SECTION_TITLE = "text-[13px] font-semibold uppercase tracking-[0.06em] text-dim mb-3 mt-0";
+
 export default function App() {
   const [report, setReport] = useState<Report | null>(null);
   const [source, setSource] = useState("");
@@ -43,19 +47,20 @@ export default function App() {
   }
 
   if (loading) {
-    return <div className="app empty">Loading report…</div>;
+    return <div className="grid h-full place-items-center text-dim">Loading report…</div>;
   }
 
   if (!report) {
     return (
-      <div className="app">
-        <h1 style={{ fontSize: 19 }}>Agent Risk Scanner — Report</h1>
+      <div className={SHELL}>
+        <h1 className="text-[19px] font-semibold">Agent Risk Scanner — Report</h1>
         {error && (
-          <p className="muted" style={{ fontSize: 12.5 }}>
-            Couldn’t load <span className="mono">{source}</span>: <span className="err">{error}</span>
+          <p className="text-[12.5px] text-faint">
+            Couldn’t load <span className="font-mono">{source}</span>:{" "}
+            <span className="text-[12.5px] text-critical">{error}</span>
           </p>
         )}
-        <div style={{ marginTop: 16 }}>
+        <div className="mt-4">
           <DropZone onLoad={adopt} />
         </div>
       </div>
@@ -63,32 +68,29 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
+    <div className={SHELL}>
+      <div className="flex justify-between gap-4">
         <Header report={report} source={source} />
         <DropZone onLoad={adopt} compact />
       </div>
 
-      <div className="section">
+      <div className="mt-[26px]">
         <PosturePanel report={report} />
       </div>
 
-      <div
-        className="section grid"
-        style={{ gridTemplateColumns: "1.6fr 1fr", alignItems: "start" }}
-      >
+      <div className="mt-[26px] grid items-start gap-[14px] [grid-template-columns:1.6fr_1fr]">
         <div className="card">
-          <h2 className="section-title">Fail-rate by case</h2>
+          <h2 className={SECTION_TITLE}>Fail-rate by case</h2>
           <FailRateChart cases={report.results} onSelect={selectCase} />
         </div>
         <div className="card">
-          <h2 className="section-title">Outcome by category</h2>
+          <h2 className={SECTION_TITLE}>Outcome by category</h2>
           <CategoryChart cases={report.results} />
         </div>
       </div>
 
-      <div className="section">
-        <h2 className="section-title">Cases</h2>
+      <div className="mt-[26px]">
+        <h2 className={SECTION_TITLE}>Cases</h2>
         <CaseList report={report} focus={focus} />
       </div>
     </div>
