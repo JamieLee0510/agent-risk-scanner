@@ -224,6 +224,15 @@ agent-risk-scan report report-20260607-143022.json --out report.html
 directory and writes a timestamped JSON report. `--timeout` (seconds, default
 60) bounds each agent run.
 
+`--jobs N` (`scan` / `gate` / `baseline`, default 1) scans up to N cases
+**concurrently**. Each case is an isolated container + an LLM call, so the scan
+is latency-bound — raising `--jobs` cuts wall-clock close to linearly (a serial
+30-minute gate finishes in roughly a third at `--jobs 4`). The cases stay
+independent (each gets its own throwaway workspace) and results are reassembled
+in corpus order, so the report and exit code are identical regardless of `--jobs`.
+The ceiling is your **LLM API rate limit**: too many concurrent jobs can trip
+429s on a low-quota key — start at 4 and raise it if your quota allows.
+
 `report` bakes a `scan`/`gate` JSON report into **one self-contained HTML file**
 (the dashboard's JS/CSS and your data are inlined — open it directly, no server,
 works offline). The same artifact serves local viewing and CI links. `gate` —
@@ -286,6 +295,8 @@ jobs:
         with:
           agent: agent.yaml
           policy: agent-risk.policy.yaml
+          jobs: "4"                 # scan 4 cases concurrently to cut gate wall-clock
+                                    # (default "1"; mind your LLM API rate limit)
         env:
           # SCOPED, DISPOSABLE key -- never a production key. Attack cases
           # deliberately try to make the agent exfiltrate whatever key it uses.

@@ -19,6 +19,7 @@ def _ns(policy_path: Path, cases_root: Path) -> argparse.Namespace:
         report=None,
         summary_md=None,
         timeout=60,
+        jobs=1,
     )
 
 

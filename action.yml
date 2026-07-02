@@ -31,6 +31,14 @@ inputs:
     description: "Per-agent-run timeout in seconds."
     required: false
     default: "60"
+  jobs:
+    description: >-
+      Number of cases to scan concurrently (default 1 = serial). Raising this
+      cuts the gate's wall-clock on the latency-bound scan, but mind your LLM
+      API rate limit -- too many concurrent jobs can trip 429s on a low-quota
+      key.
+    required: false
+    default: "1"
   python-version:
     description: "Python version used to run the scanner on the runner."
     required: false
@@ -66,6 +74,7 @@ runs:
         ARS_REPORT: ${{ inputs.report }}
         ARS_SUMMARY: ${{ inputs.summary-md }}
         ARS_TIMEOUT: ${{ inputs.timeout }}
+        ARS_JOBS: ${{ inputs.jobs }}
       run: |
         set -euo pipefail
         args=(
@@ -73,6 +82,7 @@ runs:
           --policy     "$GITHUB_WORKSPACE/$ARS_POLICY"
           --cases-root "$GITHUB_ACTION_PATH/cases"
           --timeout    "$ARS_TIMEOUT"
+          --jobs       "$ARS_JOBS"
         )
         if [ -n "$ARS_REPORT" ]; then
           args+=(--report "$GITHUB_WORKSPACE/$ARS_REPORT")

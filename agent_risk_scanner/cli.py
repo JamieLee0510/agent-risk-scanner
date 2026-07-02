@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import yaml
@@ -146,22 +148,62 @@ def _filter_exposable(case_paths: list[Path], agent: AgentConfig) -> list[Case]:
     return cases
 
 
+def _print_case_line(case: Case, runs: list, n: int) -> None:
+    counts = _verdict_counts(runs)
+    c = _counts_color(counts)
+    print(f"  {c}{_fmt_counts(counts, n):26}{_reset()} {case.name}  ({case.category})")
+
+
 def _run_cases(
-    cases: list[Case], agent: AgentConfig, tag: str, n: int, timeout: int
+    cases: list[Case], agent: AgentConfig, tag: str, n: int, timeout: int, jobs: int = 1
 ) -> list[list]:
     """Run each case n times, printing a one-line hit-rate per case. Returns
-    one inner list of CaseResults per case (the shape build_report wants)."""
-    case_runs = []
-    for case in cases:
-        runs = [
-            judge(case, run_case(case, agent, tag, timeout=timeout), mount_root=agent.workdir)
+    one inner list of CaseResults per case (the shape build_report wants).
+
+    With jobs == 1 (default) cases run serially. With jobs > 1, the individual
+    run_case invocations (cases x n) -- each an isolated container with its own
+    throwaway workspace -- run concurrently in a thread pool. The work is
+    latency-bound (each thread blocks in subprocess.run waiting on docker + the
+    agent's LLM calls), so threads parallelise it well despite the GIL.
+    Results are reassembled in the original case order, so the report and exit
+    code are identical regardless of jobs."""
+    if jobs <= 1:
+        case_runs = []
+        for case in cases:
+            runs = [
+                judge(case, run_case(case, agent, tag, timeout=timeout), mount_root=agent.workdir)
+                for _ in range(n)
+            ]
+            _print_case_line(case, runs, n)
+            case_runs.append(runs)
+        return case_runs
+
+    # Parallel: one work unit per (case, repeat). Each is independent --
+    # run_case allocates its own TemporaryDirectory and container, so there is
+    # no shared mutable state to guard beyond stdout.
+    results: list[list] = [[] for _ in cases]
+    remaining = [n for _ in cases]
+    print_lock = threading.Lock()
+
+    def _work(ci: int, case: Case):
+        return ci, judge(
+            case, run_case(case, agent, tag, timeout=timeout), mount_root=agent.workdir
+        )
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = [
+            pool.submit(_work, ci, case)
+            for ci, case in enumerate(cases)
             for _ in range(n)
         ]
-        counts = _verdict_counts(runs)
-        c = _counts_color(counts)
-        print(f"  {c}{_fmt_counts(counts, n):26}{_reset()} {case.name}  ({case.category})")
-        case_runs.append(runs)
-    return case_runs
+        for fut in as_completed(futures):
+            ci, result = fut.result()
+            with print_lock:
+                results[ci].append(result)
+                remaining[ci] -= 1
+                if remaining[ci] == 0:
+                    _print_case_line(cases[ci], results[ci], n)
+    return results
 
 
 def _resolve_suites(cases_root: Path, suites: list[str]) -> list[Path]:
@@ -316,7 +358,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     print(f"[harness] running {len(cases)} cases from {args.cases}{note}")
     print()
 
-    case_runs = _run_cases(cases, agent, tag, n, args.timeout)
+    case_runs = _run_cases(cases, agent, tag, n, args.timeout, jobs=args.jobs)
 
     report = build_report(args.agent, args.cases, case_runs)
     output = timestamped_path(args.output)
@@ -333,7 +375,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
 
 def _scan_for_policy(
-    agent_path: Path, policy: policy_mod.Policy, cases_root: Path, timeout: int
+    agent_path: Path, policy: policy_mod.Policy, cases_root: Path, timeout: int, jobs: int = 1
 ) -> dict:
     """Build the image and run every case in the policy's suites, returning a
     report dict. Shared by `gate` and `baseline` so they measure identically."""
@@ -354,7 +396,7 @@ def _scan_for_policy(
         f"x {n} run(s) each"
     )
     print()
-    case_runs = _run_cases(cases, agent, tag, n, timeout)
+    case_runs = _run_cases(cases, agent, tag, n, timeout, jobs=jobs)
     return build_report(agent_path, cases_root, case_runs)
 
 
@@ -389,7 +431,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
             )
             return policy_mod.EXIT_INFRA_ERROR
 
-    report = _scan_for_policy(args.agent, policy, args.cases_root, args.timeout)
+    report = _scan_for_policy(args.agent, policy, args.cases_root, args.timeout, jobs=args.jobs)
     if args.report:
         write_report(report, args.report)
         print(f"[gate] report written to {args.report}")
@@ -460,7 +502,7 @@ def cmd_baseline(args: argparse.Namespace) -> int:
     """Accept the agent's current findings as a baseline. After this, `gate`
     passes on today's state and only fires on regressions (specs/20260604.md §3)."""
     policy = policy_mod.load_policy(args.policy)
-    report = _scan_for_policy(args.agent, policy, args.cases_root, args.timeout)
+    report = _scan_for_policy(args.agent, policy, args.cases_root, args.timeout, jobs=args.jobs)
     doc = policy_mod.baseline_from_report(report, policy)
     args.out.write_text(json.dumps(doc, indent=2) + "\n")
     print()
@@ -513,6 +555,13 @@ def main(argv: list[str] | None = None) -> int:
         "--repeat", type=int, default=1,
         help="run each case N times and report per-case hit-rates",
     )
+    scan_p.add_argument(
+        "--jobs", "-j", type=int, default=1, metavar="N",
+        help="run up to N cases concurrently (default 1 = serial). Each job is a "
+        "container + an LLM call, so raising this cuts wall-clock on the "
+        "latency-bound scan -- but watch your LLM API rate limit: too many "
+        "concurrent jobs can trip 429s on a low-quota key.",
+    )
 
     gate_p = sub.add_parser(
         "gate",
@@ -538,6 +587,12 @@ def main(argv: list[str] | None = None) -> int:
         "$GITHUB_STEP_SUMMARY in CI to surface results on the PR)",
     )
     gate_p.add_argument("--timeout", type=int, default=60)
+    gate_p.add_argument(
+        "--jobs", "-j", type=int, default=1, metavar="N",
+        help="run up to N cases concurrently (default 1 = serial). Cuts gate "
+        "wall-clock on the latency-bound scan; mind your LLM API rate limit "
+        "(too many concurrent jobs can trip 429s on a low-quota key).",
+    )
 
     report_p = sub.add_parser(
         "report",
@@ -570,6 +625,11 @@ def main(argv: list[str] | None = None) -> int:
         help="where to write the baseline (default: .agent-risk-baseline.json)",
     )
     base_p.add_argument("--timeout", type=int, default=60)
+    base_p.add_argument(
+        "--jobs", "-j", type=int, default=1, metavar="N",
+        help="run up to N cases concurrently (default 1 = serial). Mind your "
+        "LLM API rate limit when raising it.",
+    )
 
     args = parser.parse_args(argv)
     if args.cmd == "run":

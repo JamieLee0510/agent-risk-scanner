@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `--jobs N` on `scan` / `gate` / `baseline` (and a `jobs:` input on the GitHub
+  Action) — scan up to N cases concurrently via a thread pool. The scan is
+  latency-bound (each case blocks on a container + LLM call), so raising it cuts
+  wall-clock close to linearly. Cases stay isolated and results are reassembled
+  in corpus order, so the report and exit code are independent of `--jobs`.
+  Default 1 (serial); the ceiling is the LLM API rate limit.
 - `skill:` case block — abstract poisoned Agent Skill (name / description /
   body / bundled `scripts`) with `${SKILL_DIR}` substitution, materialized by
   the harness into the agent's real skill directory
